@@ -1,8 +1,22 @@
-export function utf8(s: string): Uint8Array {
+/**
+ * A concretely `ArrayBuffer`-backed byte array — the type WebCrypto's
+ * `BufferSource` parameters (and other strict DOM byte-buffer APIs) require.
+ * Bare `Uint8Array` defaults to `Uint8Array<ArrayBufferLike>`, which also
+ * admits `SharedArrayBuffer` and is therefore no longer assignable to
+ * `BufferSource` under TypeScript 5.7+'s generic typed arrays.
+ *
+ * Every crypto-module function that produces or consumes a byte array
+ * destined for `crypto.subtle.*` (or any similarly strict Web API) should be
+ * typed with `Bytes`, not plain `Uint8Array`, so the concrete buffer type
+ * flows through call sites without casts.
+ */
+export type Bytes = Uint8Array<ArrayBuffer>;
+
+export function utf8(s: string): Bytes {
   return new TextEncoder().encode(s);
 }
 
-export function fromBase64(s: string): Uint8Array {
+export function fromBase64(s: string): Bytes {
   const bin = atob(s);
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
@@ -15,7 +29,7 @@ export function toBase64(b: Uint8Array): string {
   return btoa(bin);
 }
 
-export function concat(...parts: Uint8Array[]): Uint8Array {
+export function concat(...parts: Uint8Array[]): Bytes {
   const total = parts.reduce((n, p) => n + p.length, 0);
   const out = new Uint8Array(total);
   let off = 0;

@@ -44,6 +44,13 @@ describe("deriveMasterKey", () => {
       deriveMasterKey("p4ssw0rd", "user@example.com", { kdf: 1, iterations: 3, memory: null, parallelism: 4, salt: null }),
     ).rejects.toThrow(/memory/i);
   });
+
+  it("rejects an unknown KDF type instead of silently deriving Argon2id", async () => {
+    // KdfConfig.kdf is typed 0 | 1, but the real value comes from unvalidated
+    // server JSON — simulate a server sending something else.
+    const unknownCfg = { ...pbkdf2Cfg, kdf: 2 } as unknown as KdfConfig;
+    await expect(deriveMasterKey("p4ssw0rd", "user@example.com", unknownCfg)).rejects.toThrow(/kdf/i);
+  });
 });
 
 describe("deriveMasterPasswordHash", () => {
