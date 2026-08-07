@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "npm run typecheck && vitest run",
     "test:watch": "vitest",
     "lint:ext": "web-ext lint -s dist",
     "start:android": "web-ext run -t firefox-android -s dist"

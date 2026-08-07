@@ -20,6 +20,7 @@ describe("manifest", () => {
   });
 
   it("declares no content scripts", () => {
-    expect(manifest.content_scripts).toBeUndefined();
+    const m = manifest as typeof manifest & { content_scripts?: unknown };
+    expect(m.content_scripts).toBeUndefined();
   });
 });
