@@ -21,6 +21,31 @@ async function maybe(value: string | null, key: SymKey): Promise<string | null> 
   return decryptToString(parseEncString(value), key);
 }
 
+/**
+ * Validates a raw match value against the known UriMatchType set instead of
+ * asserting it with a type cast. Server JSON is unvalidated input: an
+ * out-of-range value (e.g. 99) must become null, not flow through as a
+ * falsely-typed UriMatchType that downstream consumers would trust.
+ */
+function normalizeMatch(match: number | null): UriMatchType | null {
+  switch (match) {
+    case 0:
+      return 0;
+    case 1:
+      return 1;
+    case 2:
+      return 2;
+    case 3:
+      return 3;
+    case 4:
+      return 4;
+    case 5:
+      return 5;
+    default:
+      return null;
+  }
+}
+
 async function decryptCipher(raw: RawCipher, parentKey: SymKey): Promise<VaultItem> {
   const key = await unwrapCipherKey(raw.key, parentKey);
 
@@ -28,7 +53,7 @@ async function decryptCipher(raw: RawCipher, parentKey: SymKey): Promise<VaultIt
   for (const u of raw.login?.uris ?? []) {
     const decrypted = await maybe(u.uri, key);
     if (decrypted !== null) {
-      uris.push({ uri: decrypted, match: (u.match as UriMatchType | null) ?? null });
+      uris.push({ uri: decrypted, match: normalizeMatch(u.match) });
     }
   }
 
@@ -89,7 +114,11 @@ function undecryptablePlaceholder(raw: RawCipher): VaultItem {
 
 export function searchItems(items: VaultItem[], query: string): VaultItem[] {
   const q = query.trim().toLowerCase();
-  if (q === "") return items;
+  // Return a fresh array even for an empty query. Returning `items` itself
+  // would let a caller that sorts/splices the "all items" result mutate the
+  // vault store's own array in place, and only on the empty-query path —
+  // exactly the kind of intermittent bug that is miserable to track down.
+  if (q === "") return [...items];
   return items.filter(
     (i) =>
       i.name.toLowerCase().includes(q) ||
