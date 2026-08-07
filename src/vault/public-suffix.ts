@@ -57,8 +57,9 @@ export function getPublicSuffix(hostname: string): string | null {
     if (!entry) continue;
 
     // Check for exception rule first (they override wildcards)
+    // Exception rules return the suffix minus the leftmost label
     if (entry.exception.has(suffix)) {
-      return suffix;
+      return labels.slice(-(len - 1)).join(".");
     }
 
     // Check for exact match
@@ -68,13 +69,13 @@ export function getPublicSuffix(hostname: string): string | null {
 
     // Check for wildcard rule matching
     // A wildcard rule at length N applies if the last (N-1) labels match the wildcard suffix
-    if (entry.wildcards.size > 0 && len < labels.length) {
+    if (entry.wildcards.size > 0 && len >= 2) {
       // The wildcard pattern is for the last (N-1) labels
       // So we check if the suffix excluding the first label matches any wildcard
       const wildcardSuffix = labels.slice(-(len - 1)).join(".");
       if (entry.wildcards.has(wildcardSuffix)) {
-        // Wildcard matches one more label above
-        return labels.slice(-(len + 1)).join(".");
+        // Wildcard matches; return this suffix as the public suffix
+        return labels.slice(-len).join(".");
       }
     }
   }
