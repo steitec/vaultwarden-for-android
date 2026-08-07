@@ -38,6 +38,29 @@ export class PreloginFailedError extends Error {
   }
 }
 
+export class TokenRequestFailedError extends Error {
+  constructor(public status: number) {
+    super(`Token request failed with status ${status}`);
+    this.name = "TokenRequestFailedError";
+  }
+}
+
+/**
+ * A response body that could not be parsed as JSON. Distinct from a
+ * non-2xx status: this is a 2xx (or otherwise "successful") response whose
+ * body was not what the client expected — e.g. an HTML error page served
+ * by a misconfigured reverse proxy with a 200 status. Never embeds the
+ * body itself, only the parse failure, so this stays safe to surface to
+ * the user or log.
+ */
+export class InvalidResponseError extends Error {
+  constructor(cause: unknown) {
+    super("The server returned a response this client could not parse.");
+    this.name = "InvalidResponseError";
+    this.cause = cause;
+  }
+}
+
 function base(server: string): string {
   return server.replace(/\/+$/, "");
 }
@@ -54,7 +77,11 @@ export async function prelogin(server: string, email: string): Promise<PreloginR
     throw new ServerUnreachableError(e);
   }
   if (!res.ok) throw new PreloginFailedError(res.status);
-  return (await res.json()) as PreloginResponse;
+  try {
+    return (await res.json()) as PreloginResponse;
+  } catch (e) {
+    throw new InvalidResponseError(e);
+  }
 }
 
 async function postToken(server: string, body: URLSearchParams): Promise<TokenResponse> {
@@ -72,7 +99,23 @@ async function postToken(server: string, body: URLSearchParams): Promise<TokenRe
     throw new ServerUnreachableError(e);
   }
 
-  if (res.ok) return (await res.json()) as TokenResponse;
+  if (res.ok) {
+    try {
+      return (await res.json()) as TokenResponse;
+    } catch (e) {
+      throw new InvalidResponseError(e);
+    }
+  }
+
+  // Only a 400 is the credential-ambiguous shape Vaultwarden uses for both
+  // "wrong password" and a 2FA challenge. Any other status (404 misconfigured
+  // URL, 429 rate limit, 500/502 server trouble, ...) is a distinct failure —
+  // collapsing it into InvalidCredentialsError would tell a user their
+  // correct password is wrong, and would mask client-side bugs (e.g. in
+  // refreshToken) as ordinary session expiry.
+  if (res.status !== 400) {
+    throw new TokenRequestFailedError(res.status);
+  }
 
   const payload = (await res.json().catch(() => ({}))) as {
     TwoFactorProviders?: (string | number)[];

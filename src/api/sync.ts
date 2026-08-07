@@ -1,5 +1,5 @@
 import type { SyncResponse } from "./types";
-import { ServerUnreachableError } from "./identity";
+import { ServerUnreachableError, InvalidResponseError } from "./identity";
 
 export class UnauthorizedError extends Error {
   constructor() {
@@ -26,5 +26,9 @@ export async function sync(server: string, accessToken: string): Promise<SyncRes
   }
   if (res.status === 401) throw new UnauthorizedError();
   if (!res.ok) throw new SyncFailedError(res.status);
-  return (await res.json()) as SyncResponse;
+  try {
+    return (await res.json()) as SyncResponse;
+  } catch (e) {
+    throw new InvalidResponseError(e);
+  }
 }
