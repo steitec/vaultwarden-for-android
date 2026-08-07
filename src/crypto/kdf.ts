@@ -1,5 +1,5 @@
 import { argon2id } from "hash-wasm";
-import { utf8, toBase64, concat } from "./bytes";
+import { utf8, toBase64, concat, type Bytes } from "./bytes";
 
 export type KdfConfig = {
   /** 0 = PBKDF2-SHA256, 1 = Argon2id */
@@ -17,16 +17,16 @@ function saltString(email: string, cfg: KdfConfig): string {
   return cfg.salt ?? email.trim().toLowerCase();
 }
 
-async function sha256(data: Uint8Array): Promise<Uint8Array> {
+async function sha256(data: Bytes): Promise<Bytes> {
   return new Uint8Array(await crypto.subtle.digest("SHA-256", data));
 }
 
 async function pbkdf2(
-  password: Uint8Array,
-  salt: Uint8Array,
+  password: Bytes,
+  salt: Bytes,
   iterations: number,
   bytes: number,
-): Promise<Uint8Array> {
+): Promise<Bytes> {
   const key = await crypto.subtle.importKey("raw", password, "PBKDF2", false, ["deriveBits"]);
   const bits = await crypto.subtle.deriveBits(
     { name: "PBKDF2", salt, iterations, hash: "SHA-256" },
@@ -40,33 +40,43 @@ export async function deriveMasterKey(
   password: string,
   email: string,
   cfg: KdfConfig,
-): Promise<Uint8Array> {
+): Promise<Bytes> {
   const salt = saltString(email, cfg);
 
   if (cfg.kdf === 0) {
     return pbkdf2(utf8(password), utf8(salt), cfg.iterations, 32);
   }
 
-  if (cfg.memory === null) throw new Error("Argon2id requires kdfMemory");
-  if (cfg.parallelism === null) throw new Error("Argon2id requires kdfParallelism");
+  if (cfg.kdf === 1) {
+    if (cfg.memory === null) throw new Error("Argon2id requires kdfMemory");
+    if (cfg.parallelism === null) throw new Error("Argon2id requires kdfParallelism");
 
-  const hex = await argon2id({
-    password: utf8(password),
-    salt: await sha256(utf8(salt)),
-    iterations: cfg.iterations,
-    memorySize: cfg.memory * 1024, // hash-wasm takes KiB; Bitwarden specifies MiB
-    parallelism: cfg.parallelism,
-    hashLength: 32,
-    outputType: "hex",
-  });
+    // hash-wasm's .d.ts declares the binary-output return as a bare
+    // `Uint8Array`, which resolves to the widened `Uint8Array<ArrayBufferLike>`
+    // (it also permits SharedArrayBuffer backing). Re-wrapping normalizes it
+    // to the concrete `Bytes` (`Uint8Array<ArrayBuffer>`) this module uses
+    // everywhere else — the same idiom as `sha256` and `pbkdf2` above.
+    return new Uint8Array(
+      await argon2id({
+        password: utf8(password),
+        salt: await sha256(utf8(salt)),
+        iterations: cfg.iterations,
+        memorySize: cfg.memory * 1024, // hash-wasm takes KiB; Bitwarden specifies MiB
+        parallelism: cfg.parallelism,
+        hashLength: 32,
+        outputType: "binary",
+      }),
+    );
+  }
 
-  const out = new Uint8Array(32);
-  for (let i = 0; i < 32; i++) out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-  return out;
+  // KdfConfig.kdf is typed 0 | 1, but the real value arrives from
+  // unvalidated server JSON (/identity/accounts/prelogin). Fail loudly
+  // rather than silently falling through to the Argon2id branch.
+  throw new Error(`Unknown KDF type: ${cfg.kdf}`);
 }
 
 export async function deriveMasterPasswordHash(
-  masterKey: Uint8Array,
+  masterKey: Bytes,
   password: string,
 ): Promise<string> {
   return toBase64(await pbkdf2(masterKey, utf8(password), 1, 32));
@@ -76,10 +86,10 @@ export async function deriveMasterPasswordHash(
  * HKDF-Expand only, with the master key used directly as the pseudorandom key.
  * There is no extract step; this is Bitwarden's scheme, not RFC 5869 in full.
  */
-async function hkdfExpand(prk: Uint8Array, info: string, bytes: number): Promise<Uint8Array> {
+async function hkdfExpand(prk: Bytes, info: string, bytes: number): Promise<Bytes> {
   const key = await crypto.subtle.importKey("raw", prk, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   const out = new Uint8Array(bytes);
-  let previous = new Uint8Array(0);
+  let previous: Bytes = new Uint8Array(0);
   let filled = 0;
   for (let counter = 1; filled < bytes; counter++) {
     const block = concat(previous, utf8(info), new Uint8Array([counter]));
@@ -93,8 +103,8 @@ async function hkdfExpand(prk: Uint8Array, info: string, bytes: number): Promise
 }
 
 export async function stretchMasterKey(
-  masterKey: Uint8Array,
-): Promise<{ encKey: Uint8Array; macKey: Uint8Array }> {
+  masterKey: Bytes,
+): Promise<{ encKey: Bytes; macKey: Bytes }> {
   return {
     encKey: await hkdfExpand(masterKey, "enc", 32),
     macKey: await hkdfExpand(masterKey, "mac", 32),
