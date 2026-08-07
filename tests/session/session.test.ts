@@ -1,8 +1,20 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { Session, MAX_PIN_ATTEMPTS } from "../../src/session/session";
+import { Session, MAX_PIN_ATTEMPTS, PinAttemptsExhaustedError } from "../../src/session/session";
 import { wrapKeyWithPin } from "../../src/session/pin";
 import type { SymKey } from "../../src/crypto/encstring";
 import type { StoredState } from "../../src/session/store";
+
+function cloneStoredState(s: StoredState): StoredState {
+  return {
+    ...s,
+    kdf: { ...s.kdf },
+    pinWrapped: s.pinWrapped === null ? null : { ...s.pinWrapped },
+  };
+}
+
+function allZero(b: Uint8Array): boolean {
+  return b.every((byte) => byte === 0);
+}
 
 const key: SymKey = { encKey: new Uint8Array(32).fill(4), macKey: new Uint8Array(32).fill(5) };
 
@@ -91,16 +103,46 @@ describe("Session", () => {
   }, 20000);
 
   it("persists the attempt BEFORE trying it, so a crash cannot buy a free guess", async () => {
-    // Simulate the process dying during the unwrap: the counter must already
-    // be on disk by the time the attempt is made.
-    let savedDuringUnwrap: number | null = null;
-    await session.init();
-    const original = saved!.failedPinAttempts;
-    await session.unlockWithPin("000000").catch(() => {
-      savedDuringUnwrap = saved!.failedPinAttempts;
+    // The naive version of this test (read `saved.failedPinAttempts` inside
+    // a .catch() after the whole unlockWithPin() promise has settled) is
+    // vacuous: the fake store's `save` hands Session back the SAME object
+    // reference it just mutated, so by the time the promise rejects, BOTH
+    // orderings — charge-then-unwrap, or unwrap-then-charge-on-catch —
+    // have already written failedPinAttempts = 1. Reading the end state
+    // can't distinguish them.
+    //
+    // To actually pin the ordering: record a deep COPY on every `save`
+    // call, and inspect that history WHILE the (real, slow) Argon2id
+    // unwrap is still in flight — i.e. before unlockWithPin's promise can
+    // possibly have settled. If the counter is charged and saved before
+    // the unwrap attempt, that first save is already on record well
+    // before the probe below runs.
+    const history: StoredState[] = [];
+    const probeSession = new Session({
+      load: async () => saved,
+      save: async (s) => {
+        history.push(cloneStoredState(s));
+        saved = s;
+      },
+      clear: async () => {
+        saved = null;
+      },
     });
-    expect(original).toBe(0);
-    expect(savedDuringUnwrap).toBe(1);
+    await probeSession.init();
+    expect(saved!.failedPinAttempts).toBe(0);
+
+    const unlockPromise = probeSession.unlockWithPin("000000");
+    // Argon2id at these parameters takes several hundred ms in this suite
+    // (see the pin.test.ts timings) — 30ms is comfortably inside that
+    // window without being so long the probe risks racing a slow CI host
+    // in the other direction.
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(history.length).toBeGreaterThan(0);
+    expect(history[0]!.failedPinAttempts).toBe(1);
+
+    await expect(unlockPromise).rejects.toThrow();
+    expect(saved!.failedPinAttempts).toBe(1);
   }, 20000);
 
   it("clears the key on lock", async () => {
@@ -109,6 +151,29 @@ describe("Session", () => {
     session.lock();
     expect(session.state).toBe("locked");
     expect(session.userKey).toBeNull();
+  }, 20000);
+
+  it("actually zeroes every key buffer on lock, not just the references", async () => {
+    // "clears the key on lock" above only proves session.userKey becomes
+    // null — it says nothing about the bytes the OLD buffer held, so a
+    // regression that deletes the zero() calls inside lock() while still
+    // nulling the fields would leave that test green. Capture the live
+    // buffers (by identity) before locking, and a seeded org key alongside
+    // them, then assert every byte of each is actually zero afterwards.
+    await session.init();
+    await session.unlockWithPin("135790");
+    const userEnc = session.userKey!.encKey;
+    const userMac = session.userKey!.macKey;
+
+    const orgKey: SymKey = { encKey: new Uint8Array(32).fill(7), macKey: new Uint8Array(32).fill(8) };
+    session.orgKeys.set("org-1", orgKey);
+
+    session.lock();
+
+    expect(allZero(userEnc)).toBe(true);
+    expect(allZero(userMac)).toBe(true);
+    expect(allZero(orgKey.encKey)).toBe(true);
+    expect(allZero(orgKey.macKey)).toBe(true);
   }, 20000);
 
   it("locks automatically once the idle timeout elapses", async () => {
@@ -136,5 +201,65 @@ describe("Session", () => {
     } finally {
       vi.useRealTimers();
     }
+  }, 20000);
+
+  it("settings returns a copy, so mutating it cannot defeat the lockout counter", async () => {
+    await session.init();
+    const s = session.settings!;
+    s.failedPinAttempts = 999;
+    s.kdf.iterations = 1;
+    // The live store, and a freshly-read copy, must both be unaffected.
+    expect(saved!.failedPinAttempts).toBe(0);
+    expect(session.settings!.failedPinAttempts).toBe(0);
+    expect(session.settings!.kdf.iterations).toBe(600000);
+  });
+
+  it("re-running init() while already unlocked zeroes the stale key instead of leaking it", async () => {
+    // A prior version of init() assigned `state = "locked"` directly on
+    // re-entry, which left `userKey` populated with live key material (and
+    // the idle timer still pending) even though the session now reports
+    // itself locked. init() must go through lock()'s cleanup instead.
+    await session.init();
+    await session.unlockWithPin("135790");
+    const oldEnc = session.userKey!.encKey;
+
+    await session.init();
+
+    expect(session.state).toBe("locked");
+    expect(session.userKey).toBeNull();
+    expect(allZero(oldEnc)).toBe(true);
+  }, 20000);
+
+  it("treats an undefined pinWrapped (a corrupt/partial stored record) the same as null", async () => {
+    await session.init();
+    // Simulate a storage read that produced `undefined` rather than an
+    // explicit `null` for a missing field. StoredState types this field as
+    // PinWrapped | null, but the runtime storage boundary is untyped, so a
+    // corrupt/partial record could still produce undefined in practice.
+    // `saved` is the same object session.init() already loaded (the fake
+    // store hands back the live reference), so mutating it here reaches
+    // the session's internal state without touching any private field.
+    (saved as { pinWrapped: unknown }).pinWrapped = undefined;
+
+    await expect(session.unlockWithPin("135790")).rejects.toThrow(PinAttemptsExhaustedError);
+    // Must be rejected by the "no pin available" guard, before any attempt
+    // is charged — exactly like the explicit-null case.
+    expect(saved!.failedPinAttempts).toBe(0);
+  }, 20000);
+
+  it("zeroes the previous key buffer when unlocking an already-unlocked session", async () => {
+    await session.init();
+    await session.unlockWithPin("135790");
+    const oldEnc = session.userKey!.encKey;
+    const oldMac = session.userKey!.macKey;
+
+    await session.unlockWithPin("135790");
+
+    expect(allZero(oldEnc)).toBe(true);
+    expect(allZero(oldMac)).toBe(true);
+    // The new key is a fresh decrypt of the same underlying key material,
+    // so it must still hold the correct (unzeroed) bytes.
+    expect(session.userKey!.encKey[0]).toBe(4);
+    expect(session.userKey!.macKey[0]).toBe(5);
   }, 20000);
 });

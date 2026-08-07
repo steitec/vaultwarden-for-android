@@ -28,14 +28,32 @@ export class Session {
 
   async init(): Promise<void> {
     this.stored = await this.store.load();
+    // Re-running init() (e.g. a background-page/service-worker restart)
+    // while a previous instance was still unlocked must not leave live key
+    // material resident and an idle timer pending — lock() already
+    // enforces exactly that discipline, so reuse it rather than assigning
+    // `state` directly and skipping the cleanup.
+    if (this.state === "unlocked") {
+      this.lock();
+    }
     this.state = this.stored === null ? "empty" : "locked";
     // The background page starts once per Firefox launch, so this flag is
     // exactly "since the last restart".
     this.pinBlockedThisRun = this.stored?.requireMasterPasswordOnRestart ?? false;
   }
 
+  /**
+   * Returns a copy, not the live object: handing out the actual `stored`
+   * reference would let a caller mutate fields like `failedPinAttempts`
+   * directly and defeat the lockout without ever going through `store`.
+   */
   get settings(): StoredState | null {
-    return this.stored;
+    if (this.stored === null) return null;
+    return {
+      ...this.stored,
+      kdf: { ...this.stored.kdf },
+      pinWrapped: this.stored.pinWrapped === null ? null : { ...this.stored.pinWrapped },
+    };
   }
 
   get pinUnlockAvailable(): boolean {
@@ -46,7 +64,21 @@ export class Session {
     if (this.pinBlockedThisRun) {
       throw new Error("Sign in with your master password after restarting Firefox.");
     }
-    if (this.stored === null || this.stored.pinWrapped === null) {
+    if (this.stored === null) {
+      throw new PinAttemptsExhaustedError();
+    }
+    // `?? null`, not a bare `this.stored.pinWrapped` truthiness/`=== null`
+    // check: StoredState types pinWrapped as `PinWrapped | null`, but the
+    // storage boundary this crosses is untyped, so a corrupt/partial record
+    // could still surface `undefined` here. Falling through on `undefined`
+    // would send it into unwrapKeyWithPin(undefined, ...), throw a raw
+    // TypeError caught below, and report "Incorrect PIN" instead of the
+    // correct PinAttemptsExhaustedError — and do it AFTER charging an
+    // attempt. Matches pinUnlockAvailable's identical guard above, and the
+    // narrowed local is reused below so unwrapKeyWithPin always receives a
+    // genuine PinWrapped.
+    const pinWrapped = this.stored.pinWrapped ?? null;
+    if (pinWrapped === null) {
       throw new PinAttemptsExhaustedError();
     }
 
@@ -65,11 +97,21 @@ export class Session {
     }
     await this.store.save(this.stored);
 
+    let newUserKey: SymKey;
     try {
-      this.userKey = await unwrapKeyWithPin(this.stored.pinWrapped, pin);
+      newUserKey = await unwrapKeyWithPin(pinWrapped, pin);
     } catch {
       throw new Error("Incorrect PIN");
     }
+
+    // Re-unlocking an already-unlocked session (or any path that leaves a
+    // stale userKey behind) must not orphan the previous buffer with live
+    // key bytes still in it: zero it before the reference is replaced.
+    if (this.userKey !== null) {
+      zero(this.userKey.encKey);
+      zero(this.userKey.macKey);
+    }
+    this.userKey = newUserKey;
 
     this.stored.failedPinAttempts = 0;
     await this.store.save(this.stored);
