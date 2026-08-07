@@ -16,14 +16,16 @@ function parse(url: string): URL | null {
 
 /**
  * Check if a hostname is an IP address (IPv4 or IPv6) or single-label (localhost).
+ * Hostnames may have a trailing dot; strip it before testing.
  */
 function isIpOrSingleLabel(hostname: string): boolean {
+  const host = hostname.replace(/\.$/, "");
   // IPv4
-  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)) return true;
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return true;
   // IPv6 (enclosed in brackets)
-  if (hostname.startsWith("[") && hostname.endsWith("]")) return true;
+  if (host.startsWith("[") && host.endsWith("]")) return true;
   // Single label (no dots)
-  if (!hostname.includes(".")) return true;
+  if (!host.includes(".")) return true;
   return false;
 }
 
