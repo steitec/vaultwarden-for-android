@@ -5,6 +5,7 @@ import type { SyncResponse } from "../../src/api/types";
 import { toBase64, concat, type Bytes } from "../../src/crypto/bytes";
 
 const userKey: SymKey = { encKey: new Uint8Array(32).fill(1), macKey: new Uint8Array(32).fill(2) };
+const orgKey: SymKey = { encKey: new Uint8Array(32).fill(5), macKey: new Uint8Array(32).fill(6) };
 
 async function wrapBytes(data: Bytes, key: SymKey): Promise<string> {
   const iv = crypto.getRandomValues(new Uint8Array(16));
@@ -83,6 +84,34 @@ describe("decryptVault", () => {
     expect(item!.name).toBe("Scoped");
     expect(item!.username).toBe("scoped-user");
   });
+
+  it("decrypts an organization item using the matching org key", async () => {
+    const p = await payload({ organizationId: "org1" });
+    p.ciphers[0]!.name = await wrap("OrgSecret", orgKey);
+    p.ciphers[0]!.login!.username = await wrap("org-user", orgKey);
+    p.ciphers[0]!.login!.password = await wrap("org-pass", orgKey);
+    p.ciphers[0]!.login!.uris = [{ uri: await wrap("https://org.example", orgKey), match: null }];
+
+    const [item] = await decryptVault(p, userKey, new Map([["org1", orgKey]]));
+    expect(item!.name).toBe("OrgSecret");
+    expect(item!.username).toBe("org-user");
+    expect(item!.password).toBe("org-pass");
+    expect(item!.uris[0]!.uri).toBe("https://org.example");
+    expect(item!.undecryptable).toBe(false);
+  });
+
+  it("marks an organization item undecryptable when its org key is absent, never falling back to the user key", async () => {
+    // Fields are wrapped under userKey (the payload() default). If the
+    // implementation ever fell back to the user key when the org key is
+    // missing, this item would actually decrypt successfully to "GitHub" —
+    // that is exactly the bug this test must catch.
+    const p = await payload({ organizationId: "org1" });
+    const items = await decryptVault(p, userKey, new Map()); // no "org1" entry
+    expect(items).toHaveLength(1);
+    expect(items[0]!.undecryptable).toBe(true);
+    expect(items[0]!.name).not.toBe("GitHub");
+    expect(items[0]!.name).toMatch(/cannot be decrypted/i);
+  });
 });
 
 describe("searchItems", () => {
@@ -120,5 +149,21 @@ describe("matchItems", () => {
 
   it("returns an empty list when nothing matches", () => {
     expect(matchItems(items, "https://unrelated.test/")).toHaveLength(0);
+  });
+
+  it("never matches a 'never' (match: 5) uri, even when the hostname coincides", () => {
+    const neverItems: VaultItem[] = [
+      {
+        id: "3",
+        name: "Never",
+        username: null,
+        password: null,
+        totp: null,
+        uris: [{ uri: "https://example.com/login", match: 5 }],
+        favorite: false,
+        undecryptable: false,
+      },
+    ];
+    expect(matchItems(neverItems, "https://example.com/login")).toEqual([]);
   });
 });
