@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 // The module under test registers a browser.runtime.onMessage listener at
 // import time (it is injected on demand by the background page). `browser`
@@ -35,6 +35,32 @@ function setBody(html: string) {
 }
 
 beforeEach(() => setBody(""));
+
+// jsdom runs no layout engine, so every getBoundingClientRect() is zero and
+// the geometry layer is skipped by design. Tests that need to exercise that
+// layer install a prototype stub; this pristine reference plus the afterEach
+// below guarantee it cannot leak into any other test even if one throws.
+const NATIVE_GET_RECT = HTMLElement.prototype.getBoundingClientRect;
+afterEach(() => {
+  HTMLElement.prototype.getBoundingClientRect = NATIVE_GET_RECT;
+});
+
+/**
+ * Makes the document behave as if a layout engine had run: the root element
+ * reports a real viewport-sized box (which is what un-gates the geometry
+ * layer), every element reports a plausible on-screen box, and the elements
+ * named in `rects` report whatever the test dictates.
+ */
+function stubLayout(rects: Record<string, DOMRect>): () => void {
+  HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement): DOMRect {
+    if (this === document.documentElement) return new DOMRect(0, 0, 1024, 768);
+    const override = this.id === "" ? undefined : rects[this.id];
+    return override ?? new DOMRect(0, 0, 200, 30);
+  };
+  return () => {
+    HTMLElement.prototype.getBoundingClientRect = NATIVE_GET_RECT;
+  };
+}
 
 describe("findLoginFields", () => {
   it("finds a standard username and password pair", () => {
@@ -190,6 +216,204 @@ describe("findLoginFields", () => {
       <form><input type="password" name="pw"></form>
     `);
     expect(findLoginFields(document).username).toBeNull();
+  });
+});
+
+// A decoy that is off-screen by *position alone* carries no display,
+// visibility, opacity or `hidden` signal whatsoever -- it is an ordinary,
+// fully "visible" element as far as those four checks are concerned. This is
+// the exploit that shipped past the first visibility fix: the harvester's
+// field is the first password input in document order, so it won the
+// selection and received the real credential while the field the user was
+// looking at stayed empty. Each test below asserts BOTH halves -- decoy empty
+// AND real field filled -- because asserting only that the decoy is empty
+// would pass trivially if nothing at all were selected.
+describe("off-screen decoy fields", () => {
+  const CREDS = { username: "u@example.com", password: "hunter2" };
+
+  function expectRealFormWon() {
+    const f = findLoginFields(document);
+    expect(f.username!.id).toBe("realuser");
+    expect(f.password!.id).toBe("realpass");
+
+    const r = fillFields(document, CREDS);
+    expect(r).toEqual({ filledUsername: true, filledPassword: true });
+    expect(document.querySelector<HTMLInputElement>("#evilpass")!.value).toBe("");
+    expect(document.querySelector<HTMLInputElement>("#eviluser")!.value).toBe("");
+    expect(document.querySelector<HTMLInputElement>("#realpass")!.value).toBe("hunter2");
+    expect(document.querySelector<HTMLInputElement>("#realuser")!.value).toBe("u@example.com");
+  }
+
+  const REAL_FORM = `
+    <form>
+      <input type="text" name="real-user" id="realuser">
+      <input type="password" name="real-pass" id="realpass">
+    </form>
+  `;
+
+  it("does not fill a decoy in an absolutely positioned off-screen wrapper", () => {
+    setBody(`
+      <div style="position:absolute;left:-9999px;top:-9999px">
+        <input type="text" name="evil-user" id="eviluser">
+        <input type="password" name="evil-pass" id="evilpass">
+      </div>
+      ${REAL_FORM}
+    `);
+    expectRealFormWon();
+  });
+
+  it("does not fill a decoy in a fixed-position off-screen wrapper", () => {
+    setBody(`
+      <div style="position:fixed;left:-5000px">
+        <input type="text" name="evil-user" id="eviluser">
+        <input type="password" name="evil-pass" id="evilpass">
+      </div>
+      ${REAL_FORM}
+    `);
+    expectRealFormWon();
+  });
+
+  it("does not fill inputs positioned off-screen directly rather than via a wrapper", () => {
+    setBody(`
+      <input type="text" name="evil-user" id="eviluser" style="position:absolute;top:-9999px">
+      <input type="password" name="evil-pass" id="evilpass" style="position:absolute;top:-9999px">
+      ${REAL_FORM}
+    `);
+    expectRealFormWon();
+  });
+
+  it("does not fill a decoy inside a zero-size overflow:hidden wrapper", () => {
+    setBody(`
+      <div style="width:0;height:0;overflow:hidden">
+        <input type="text" name="evil-user" id="eviluser">
+        <input type="password" name="evil-pass" id="evilpass">
+      </div>
+      ${REAL_FORM}
+    `);
+    expectRealFormWon();
+  });
+
+  // The negative control for the threshold. Absolute positioning with a small
+  // offset is ordinary layout -- overlays, floating labels, popovers -- and a
+  // check that rejected it would break real login pages, which is a worse
+  // outcome than the attack it prevents.
+  it("still fills an absolutely positioned form with a small, on-screen offset", () => {
+    setBody(`
+      <form style="position:absolute;left:20px;top:40px">
+        <input type="text" name="u" id="realuser">
+        <input type="password" name="p" id="realpass">
+      </form>
+    `);
+    const f = findLoginFields(document);
+    expect(f.username!.id).toBe("realuser");
+    expect(f.password!.id).toBe("realpass");
+    expect(fillFields(document, CREDS)).toEqual({ filledUsername: true, filledPassword: true });
+    expect(document.querySelector<HTMLInputElement>("#realpass")!.value).toBe("hunter2");
+  });
+
+  it("still fills a form whose wrapper is positioned with a non-px or auto offset", () => {
+    setBody(`
+      <div style="position:absolute;left:auto;top:-2em">
+        <form>
+          <input type="text" name="u" id="realuser">
+          <input type="password" name="p" id="realpass">
+        </form>
+      </div>
+    `);
+    expect(fillFields(document, CREDS)).toEqual({ filledUsername: true, filledPassword: true });
+    expect(document.querySelector<HTMLInputElement>("#realpass")!.value).toBe("hunter2");
+  });
+});
+
+// The geometry layer exists for the decoys the CSSOM walk cannot see at all:
+// off-screen via a class in an external stylesheet, a transform, a clip-path,
+// or a field scrolled out of an overflow container. jsdom never produces such
+// geometry on its own, so these tests synthesise it.
+describe("off-screen decoy fields detected by rendered geometry", () => {
+  const CREDS = { username: "u@example.com", password: "hunter2" };
+
+  const PAGE = `
+    <div class="offscreen-via-external-stylesheet">
+      <input type="text" name="evil-user" id="eviluser">
+      <input type="password" name="evil-pass" id="evilpass">
+    </div>
+    <form>
+      <input type="text" name="real-user" id="realuser">
+      <input type="password" name="real-pass" id="realpass">
+    </form>
+  `;
+
+  it("rejects a field rendered outside the viewport with no CSSOM tell", () => {
+    setBody(PAGE);
+    const restore = stubLayout({
+      eviluser: new DOMRect(-9999, -9999, 200, 30),
+      evilpass: new DOMRect(-9999, -9960, 200, 30),
+    });
+    try {
+      const f = findLoginFields(document);
+      expect(f.username!.id).toBe("realuser");
+      expect(f.password!.id).toBe("realpass");
+
+      fillFields(document, CREDS);
+      expect(document.querySelector<HTMLInputElement>("#evilpass")!.value).toBe("");
+      expect(document.querySelector<HTMLInputElement>("#realpass")!.value).toBe("hunter2");
+    } finally {
+      restore();
+    }
+  });
+
+  it("rejects a field rendered with zero size with no CSSOM tell", () => {
+    setBody(PAGE);
+    const restore = stubLayout({
+      eviluser: new DOMRect(10, 10, 0, 0),
+      evilpass: new DOMRect(10, 10, 0, 0),
+    });
+    try {
+      const f = findLoginFields(document);
+      expect(f.username!.id).toBe("realuser");
+      expect(f.password!.id).toBe("realpass");
+
+      fillFields(document, CREDS);
+      expect(document.querySelector<HTMLInputElement>("#evilpass")!.value).toBe("");
+      expect(document.querySelector<HTMLInputElement>("#realpass")!.value).toBe("hunter2");
+    } finally {
+      restore();
+    }
+  });
+
+  it("rejects a field rendered past the right edge of the viewport", () => {
+    setBody(PAGE);
+    const restore = stubLayout({
+      eviluser: new DOMRect(5000, 10, 200, 30),
+      evilpass: new DOMRect(5000, 50, 200, 30),
+    });
+    try {
+      fillFields(document, CREDS);
+      expect(document.querySelector<HTMLInputElement>("#evilpass")!.value).toBe("");
+      expect(document.querySelector<HTMLInputElement>("#realpass")!.value).toBe("hunter2");
+    } finally {
+      restore();
+    }
+  });
+
+  // The complement, and the reason the layer is gated at all: under jsdom the
+  // root element reports a zero rect, which means no layout engine ran and
+  // every field's zero rect is an artefact rather than evidence. If the
+  // geometry layer ran unconditionally it would reject the entire page here
+  // and autofill would silently stop working under test -- and, worse, in any
+  // real context where layout has not yet been performed.
+  it("skips the geometry layer entirely when the document reports no layout", () => {
+    setBody(`<form><input type="text" name="u" id="realuser"><input type="password" name="p" id="realpass"></form>`);
+
+    const rootRect = document.documentElement.getBoundingClientRect();
+    expect(rootRect.width).toBe(0);
+    expect(rootRect.height).toBe(0);
+    const fieldRect = document.querySelector("#realpass")!.getBoundingClientRect();
+    expect(fieldRect.width).toBe(0);
+    expect(fieldRect.height).toBe(0);
+
+    expect(fillFields(document, CREDS)).toEqual({ filledUsername: true, filledPassword: true });
+    expect(document.querySelector<HTMLInputElement>("#realpass")!.value).toBe("hunter2");
   });
 });
 
