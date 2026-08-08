@@ -4,12 +4,12 @@ import { deriveMasterKey, deriveMasterPasswordHash, type KdfConfig } from "../cr
 import { unwrapUserKey, unwrapPrivateKey, unwrapOrgKey } from "../crypto/keys";
 import { zero } from "../crypto/bytes";
 import type { SymKey } from "../crypto/encstring";
-import type { TokenResponse, SyncResponse } from "../api/types";
+import type { LoginTokenResponse, SyncResponse } from "../api/types";
 
 export type LoginResult = {
   userKey: SymKey;
   orgKeys: Map<string, SymKey>;
-  tokens: TokenResponse;
+  tokens: LoginTokenResponse;
   kdf: KdfConfig;
   payload: SyncResponse;
 };
@@ -76,11 +76,11 @@ export async function performLogin(params: {
 
     const payload = await sync(params.serverUrl, tokens.access_token);
 
-    // `payload` is not yet structurally validated (that lands with the
-    // captured-server-response fixture in Task 16), so reach into it
-    // defensively: a server that answered 200 with an unexpected body must
-    // not crash setup with a raw TypeError.
-    const orgs = payload.profile?.organizations ?? [];
+    // `sync()` validates the payload structurally (isSyncResponse), so this
+    // is a well-formed vault. `organizations` stays optional-chained
+    // because the guard permits an absent/null list — an account in no
+    // organizations is the common case, not an error.
+    const orgs = payload.profile.organizations ?? [];
     if (orgs.length > 0) {
       const privateKey = await unwrapPrivateKey(tokens.PrivateKey, userKey);
       for (const org of orgs) {

@@ -77,4 +77,46 @@ describe("sync", () => {
     const err = await sync("https://v.example.net", "t").catch((e) => e);
     expect(err).toBeInstanceOf(InvalidResponseError);
   });
+
+  it.each([
+    ["an unrelated 200 body", { object: "sync" }],
+    ["ciphers that are not an array", { profile: { organizations: [] }, ciphers: {}, folders: [] }],
+    ["a cipher that is a bare object", { profile: { organizations: [] }, ciphers: [{}], folders: [] }],
+    ["a null body", null],
+  ])("raises InvalidResponseError for %s rather than returning it unchecked", async (_l, body) => {
+    // Without this the payload would flow on to decryptVault (and into the
+    // offline cache), where isSyncResponse rejects it in loadFromCache and
+    // the user simply sees an empty vault with no error anywhere.
+    stubFetch(200, body);
+    const err = await sync("https://v.example.net", "t").catch((e) => e);
+    expect(err).toBeInstanceOf(InvalidResponseError);
+  });
+
+  it("does not put any of the server's body into the error message", async () => {
+    stubFetch(200, { object: "sync", secretish: "server-controlled text" });
+    const err = await sync("https://v.example.net", "t").catch((e) => e);
+    expect((err as Error).message).not.toMatch(/server-controlled/);
+  });
+
+  it("accepts a real vault shape, including omitted login sub-fields", async () => {
+    // The fields vaultwarden actually omits; see tests/api/types.test.ts.
+    const body = {
+      profile: { organizations: null },
+      folders: [{ id: "f1", name: "2.a|b|c" }],
+      ciphers: [
+        {
+          id: "c1",
+          organizationId: null,
+          folderId: null,
+          type: 1,
+          name: "2.a|b|c",
+          favorite: false,
+          key: null,
+          login: { password: "2.d|e|f", uris: null },
+        },
+      ],
+    };
+    stubFetch(200, body);
+    await expect(sync("https://v.example.net", "t")).resolves.toEqual(body);
+  });
 });
