@@ -6,6 +6,7 @@ import type { StoredState } from "../../src/session/store";
 import type { SymKey } from "../../src/crypto/encstring";
 import { encryptToString } from "../../src/crypto/encstring";
 import { utf8 } from "../../src/crypto/bytes";
+import { InvalidResponseError } from "../../src/api/identity";
 
 const PIN = "135790";
 const userKey: SymKey = {
@@ -463,6 +464,53 @@ describe("Controller", () => {
       await controller.unlock(PIN);
       const items = await controller.list("");
       expect(items.map((i) => i.id)).toEqual(["c1"]);
+    }, 20000);
+  });
+
+  describe("syncNow", () => {
+    /** Serves the token endpoint and one canned /api/sync response. */
+    function stubServer(syncStatus: number, syncBody: unknown) {
+      return vi.fn().mockImplementation(async (url: string) => ({
+        ok: url.includes("/api/sync") ? syncStatus >= 200 && syncStatus < 300 : true,
+        status: url.includes("/api/sync") ? syncStatus : 200,
+        json: async () =>
+          url.includes("/api/sync")
+            ? syncBody
+            : { access_token: "at", refresh_token: "rt2", expires_in: 3600 },
+        text: async () => "",
+      }));
+    }
+
+    async function unlockedWithRefreshToken(): Promise<Harness> {
+      const h = await makeController({
+        wrappedRefreshToken: await encryptToString(utf8("rt"), userKey),
+      });
+      await h.controller.unlock(PIN);
+      return h;
+    }
+
+    it("replaces the cache with a freshly synced vault", async () => {
+      const h = await unlockedWithRefreshToken();
+      vi.stubGlobal("fetch", stubServer(200, JSON.parse(await cacheOf([
+        { id: "c2", name: "Fastmail", uris: ["https://fastmail.com"] },
+      ]))));
+
+      await h.controller.syncNow();
+      expect((await h.controller.list("")).map((i) => i.id)).toEqual(["c2"]);
+    }, 20000);
+
+    it("rejects a 200 whose body is not a vault, and keeps the previous cache", async () => {
+      // sync() validates with isSyncResponse now, so a server that answers
+      // 200 with something else is a loud InvalidResponseError instead of a
+      // silently empty vault. The cache must survive it: an unusable
+      // response is not a reason to lose the offline copy.
+      const h = await unlockedWithRefreshToken();
+      const before = h.stored()?.cipherCache;
+      vi.stubGlobal("fetch", stubServer(200, { object: "sync", ciphers: "nope" }));
+
+      await expect(h.controller.syncNow()).rejects.toBeInstanceOf(InvalidResponseError);
+      expect(h.stored()?.cipherCache).toBe(before);
+      expect((await h.controller.list("")).map((i) => i.id)).toEqual(["c1"]);
     }, 20000);
   });
 
