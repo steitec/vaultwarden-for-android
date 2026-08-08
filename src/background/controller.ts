@@ -128,12 +128,12 @@ export class Controller {
    * First-run master-password login: verifies the credentials, unwraps the
    * vault keys, wraps them under the PIN, and writes the account to disk.
    *
-   * Host access is requested for the ONE origin the user configured, never
+   * Host access is verified for the ONE origin the user configured, never
    * for the broad https wildcard the manifest has to declare. MV2 cannot
    * express a runtime-determined origin in `optional_permissions`, so the
    * manifest names a pattern; the extension only ever holds the single
-   * origin granted here. The request happens before the first network call,
-   * so a declined prompt costs nothing and leaks nothing to the server.
+   * origin the popup asked for. The check happens before the first network
+   * call, so a missing grant costs nothing and leaks nothing to the server.
    *
    * Failure atomicity: nothing touches the session until the store has
    * accepted the new state (see Session.adoptLogin). If the PIN wrap or the
@@ -158,7 +158,15 @@ export class Controller {
     }
     if (parsed.protocol !== "https:") throw new InsecureServerUrlError();
 
-    const granted = await browser.permissions.request({ origins: [`${parsed.origin}/*`] });
+    // contains(), not request(): Firefox only allows permissions.request()
+    // from inside a user input handler, and the gesture does NOT survive the
+    // `runtime.sendMessage` hop that brings us here from the popup — calling
+    // request() in the background page throws "permissions.request may only
+    // be called from a user input handler" for every real user. So the popup
+    // does the asking from its own click handler and the background only
+    // verifies. `parsed.origin` already carries the port when the URL has
+    // one, keeping the pattern to exactly the configured host.
+    const granted = await browser.permissions.contains({ origins: [`${parsed.origin}/*`] });
     if (!granted) throw new HostPermissionDeniedError(parsed.origin);
 
     const deviceId = crypto.randomUUID();
