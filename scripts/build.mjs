@@ -38,6 +38,12 @@ copyFileSync(resolve(root, "src/manifest.json"), resolve(outDir, "manifest.json"
 copyFileSync(resolve(root, "src/popup/popup.html"), resolve(outDir, "popup.html"));
 copyFileSync(resolve(root, "src/popup/popup.css"), resolve(outDir, "popup.css"));
 
+// Both sizes the manifest names, flattened to dist/ root because the manifest
+// references them as bare filenames. A missing icon is only a `web-ext lint`
+// warning, not a build error, so it would otherwise reach AMO unnoticed.
+copyFileSync(resolve(root, "src/icons/icon-48.png"), resolve(outDir, "icon-48.png"));
+copyFileSync(resolve(root, "src/icons/icon-96.png"), resolve(outDir, "icon-96.png"));
+
 console.log(
   `Built ${present.length} entry point(s): ${present.map((e) => e.name).join(", ")}`,
 );
