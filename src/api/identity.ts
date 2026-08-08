@@ -1,4 +1,12 @@
-import type { PreloginResponse, TokenResponse } from "./types";
+import {
+  isPreloginResponse,
+  isTokenResponse,
+  isLoginTokenResponse,
+  isTwoFactorChallenge,
+  type PreloginResponse,
+  type TokenResponse,
+  type LoginTokenResponse,
+} from "./types";
 
 /** Bitwarden DeviceType.FirefoxExtension */
 const DEVICE_TYPE = "3";
@@ -46,12 +54,15 @@ export class TokenRequestFailedError extends Error {
 }
 
 /**
- * A response body that could not be parsed as JSON. Distinct from a
- * non-2xx status: this is a 2xx (or otherwise "successful") response whose
- * body was not what the client expected — e.g. an HTML error page served
- * by a misconfigured reverse proxy with a 200 status. Never embeds the
- * body itself, only the parse failure, so this stays safe to surface to
- * the user or log.
+ * A response body that was not what the client expected: either not JSON at
+ * all — e.g. an HTML error page served by a misconfigured reverse proxy
+ * with a 200 status — or JSON whose structure a boundary guard rejected.
+ * Distinct from a non-2xx status.
+ *
+ * The message is fixed and carries nothing from the response. `cause` may
+ * hold a parse error or a short guard label; it is never promoted into
+ * `.message`, and the popup refuses to render it, because everything on the
+ * far side of this boundary is server-controlled text.
  */
 export class InvalidResponseError extends Error {
   constructor(cause: unknown) {
@@ -77,14 +88,36 @@ export async function prelogin(server: string, email: string): Promise<PreloginR
     throw new ServerUnreachableError(e);
   }
   if (!res.ok) throw new PreloginFailedError(res.status);
+
+  let payload: unknown;
   try {
-    return (await res.json()) as PreloginResponse;
+    payload = await res.json();
   } catch (e) {
     throw new InvalidResponseError(e);
   }
+  // Validated, not asserted: `kdf` and `kdfIterations` go straight into key
+  // derivation, and an unrecognised kdf value would otherwise only be
+  // caught deep inside deriveMasterKey (or, worse, fall through to the
+  // wrong algorithm). Optional fields are normalized to null here so no
+  // caller has to distinguish absent from null.
+  if (!isPreloginResponse(payload)) {
+    throw new InvalidResponseError("prelogin response had unusable kdf parameters");
+  }
+  return {
+    kdf: payload.kdf,
+    kdfIterations: payload.kdfIterations,
+    kdfMemory: payload.kdfMemory ?? null,
+    kdfParallelism: payload.kdfParallelism ?? null,
+    salt: payload.salt ?? null,
+  };
 }
 
-async function postToken(server: string, body: URLSearchParams): Promise<TokenResponse> {
+/**
+ * Posts to the token endpoint and returns the parsed body UNVALIDATED —
+ * the two grants have different required fields (a refresh grant carries no
+ * key material at all), so each caller applies its own guard.
+ */
+async function postToken(server: string, body: URLSearchParams): Promise<unknown> {
   let res: Response;
   try {
     res = await fetch(`${base(server)}/identity/connect/token`, {
@@ -101,7 +134,7 @@ async function postToken(server: string, body: URLSearchParams): Promise<TokenRe
 
   if (res.ok) {
     try {
-      return (await res.json()) as TokenResponse;
+      return await res.json();
     } catch (e) {
       throw new InvalidResponseError(e);
     }
@@ -117,10 +150,10 @@ async function postToken(server: string, body: URLSearchParams): Promise<TokenRe
     throw new TokenRequestFailedError(res.status);
   }
 
-  const payload = (await res.json().catch(() => ({}))) as {
-    TwoFactorProviders?: (string | number)[];
-  };
-  if (payload.TwoFactorProviders && payload.TwoFactorProviders.length > 0) {
+  // An unparseable 400 body is not a 2FA challenge; `{}` keeps the
+  // behaviour identical to a 400 that simply carries no provider list.
+  const payload: unknown = await res.json().catch(() => ({}));
+  if (isTwoFactorChallenge(payload)) {
     throw new TwoFactorRequiredError(payload.TwoFactorProviders.map(Number));
   }
   throw new InvalidCredentialsError();
@@ -132,7 +165,7 @@ export async function requestToken(
   masterPasswordHash: string,
   deviceId: string,
   twoFactor?: { token: string; provider: number },
-): Promise<TokenResponse> {
+): Promise<LoginTokenResponse> {
   const body = new URLSearchParams({
     grant_type: "password",
     username: email,
@@ -148,11 +181,19 @@ export async function requestToken(
     body.set("twoFactorProvider", String(twoFactor.provider));
     body.set("twoFactorRemember", "1");
   }
-  return postToken(server, body);
+  const payload = await postToken(server, body);
+  // The strict guard: this response's `Key` and `PrivateKey` are fed
+  // straight into unwrapUserKey/unwrapPrivateKey by login.ts, and both are
+  // entirely server-controlled. Refuse here rather than discovering an
+  // `undefined` inside parseEncString.
+  if (!isLoginTokenResponse(payload)) {
+    throw new InvalidResponseError("token response was missing tokens or key material");
+  }
+  return payload;
 }
 
 export async function refreshToken(server: string, token: string): Promise<TokenResponse> {
-  return postToken(
+  const payload = await postToken(
     server,
     new URLSearchParams({
       grant_type: "refresh_token",
@@ -160,4 +201,11 @@ export async function refreshToken(server: string, token: string): Promise<Token
       refresh_token: token,
     }),
   );
+  // Deliberately the loose guard: vaultwarden's refresh grant answers with
+  // tokens only and no key material. Demanding Key/PrivateKey here would
+  // reject every real refresh.
+  if (!isTokenResponse(payload)) {
+    throw new InvalidResponseError("refresh response did not contain tokens");
+  }
+  return payload;
 }
