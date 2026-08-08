@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { mkdtempSync, writeFileSync, rmSync, readFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -114,6 +114,23 @@ describe("classic script build (regression guard for MV2 background/content scri
 
     const source = readFileSync(join(outDir, "background.js"), "utf8");
     expect(source).not.toMatch(ESM_SYNTAX);
-    expect(() => vm.runInContext(source, vm.createContext({}))).not.toThrow();
+
+    // The background entry registers its onMessage listener and starts the
+    // controller at load time, so the sandbox has to provide the
+    // WebExtension globals it legitimately depends on -- exactly the ones
+    // Firefox itself provides to a background script. This is the harness
+    // becoming more realistic, not the assertion becoming weaker: the
+    // "runs as a classic script without throwing" check now exercises the
+    // entry's real top-level work (module graph fully inlined, controller
+    // constructed, listener registered) instead of an empty module.
+    const addListener = vi.fn();
+    const sandbox = {
+      browser: {
+        runtime: { id: "test@example", onMessage: { addListener } },
+        storage: { local: { get: async () => ({}), set: async () => {}, remove: async () => {} } },
+      },
+    };
+    expect(() => vm.runInContext(source, vm.createContext(sandbox))).not.toThrow();
+    expect(addListener).toHaveBeenCalledTimes(1);
   });
 });

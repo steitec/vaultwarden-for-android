@@ -149,4 +149,23 @@ export class Session {
     }
     this.state = this.stored === null ? "empty" : "locked";
   }
+
+  /**
+   * Wipes the device. `lock()` only zeroes the in-memory keys; everything
+   * that makes an offline attack possible — `protectedUserKey`,
+   * `pinWrapped`, `wrappedRefreshToken` and the `cipherCache` — lives in
+   * `browser.storage.local` and survives a lock, a browser restart and an
+   * extension update. Without this there is no way to get it off the
+   * device short of uninstalling the extension.
+   *
+   * lock() first so the key material is zeroed even if the store's clear()
+   * rejects, and the state is set explicitly afterwards because lock()
+   * decides it from `stored`, which is still populated at that point.
+   */
+  async signOut(): Promise<void> {
+    this.lock();
+    await this.store.clear();
+    this.stored = null;
+    this.state = "empty";
+  }
 }

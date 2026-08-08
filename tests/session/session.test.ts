@@ -247,6 +247,26 @@ describe("Session", () => {
     expect(saved!.failedPinAttempts).toBe(0);
   }, 20000);
 
+  it("signOut zeroes the live keys AND clears the persisted state", async () => {
+    // lock() alone leaves protectedUserKey, pinWrapped, wrappedRefreshToken
+    // and the cipherCache sitting in browser.storage.local indefinitely.
+    // signOut is the only path that takes them off the device.
+    await session.init();
+    await session.unlockWithPin("135790");
+    const enc = session.userKey!.encKey;
+    const mac = session.userKey!.macKey;
+
+    await session.signOut();
+
+    expect(allZero(enc)).toBe(true);
+    expect(allZero(mac)).toBe(true);
+    expect(session.userKey).toBeNull();
+    expect(saved).toBeNull();
+    expect(session.state).toBe("empty");
+    expect(session.settings).toBeNull();
+    expect(session.pinUnlockAvailable).toBe(false);
+  }, 20000);
+
   it("zeroes the previous key buffer when unlocking an already-unlocked session", async () => {
     await session.init();
     await session.unlockWithPin("135790");
