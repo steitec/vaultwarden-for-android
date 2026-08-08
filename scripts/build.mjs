@@ -32,6 +32,12 @@ for (const entry of present) {
 
 copyFileSync(resolve(root, "src/manifest.json"), resolve(outDir, "manifest.json"));
 
+// The popup's static assets. Only the .ts entry is built; the document that
+// loads it and its stylesheet have to be copied, or browser_action opens a
+// 404 with no script in it.
+copyFileSync(resolve(root, "src/popup/popup.html"), resolve(outDir, "popup.html"));
+copyFileSync(resolve(root, "src/popup/popup.css"), resolve(outDir, "popup.css"));
+
 console.log(
   `Built ${present.length} entry point(s): ${present.map((e) => e.name).join(", ")}`,
 );

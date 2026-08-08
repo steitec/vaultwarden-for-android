@@ -14,6 +14,10 @@
   },
   "permissions": ["storage", "activeTab"],
   "optional_permissions": ["https://*/*"],
+  "browser_action": {
+    "default_title": "Vaultwarden",
+    "default_popup": "popup.html"
+  },
   "background": {
     "scripts": ["background.js"],
     "persistent": true
