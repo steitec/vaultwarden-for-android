@@ -92,10 +92,17 @@ export type SetupValues = {
   password: string;
   pin: string;
   /**
-   * The match pattern for exactly the entered server — `https://host[:port]/*`
-   * — computed here so the caller's handler can reach
-   * `browser.permissions.request()` without parsing anything first. See
-   * `renderSetup` for why that matters down to the statement.
+   * The match pattern for exactly the entered server's host — computed here
+   * so the caller's handler can reach `browser.permissions.request()` without
+   * parsing anything first. See `renderSetup` for why that matters down to
+   * the statement.
+   *
+   * Host only, never `origin`: Firefox match patterns have no port component
+   * (bug 1362809), so `https://host:8443/*` is not a narrower pattern, it is
+   * an invalid one that `permissions.request()` rejects outright — which
+   * would make a Vaultwarden on a non-standard port impossible to set up. A
+   * portless host pattern is what Firefox accepts, and it must be identical
+   * to the one `Controller.setup` checks with `permissions.contains()`.
    */
   originPattern: string;
 };
@@ -209,9 +216,9 @@ export function renderSetup(
       email: address,
       password: masterPassword,
       pin: chosenPin,
-      // `parsed.origin` already carries the port when there is one, so this
-      // is the single configured host and never the manifest's wildcard.
-      originPattern: `${parsed.origin}/*`,
+      // The single configured host, never the manifest's wildcard. See
+      // `SetupValues.originPattern` for why the port is left out.
+      originPattern: `https://${parsed.hostname}/*`,
     })
       .catch((e: unknown) => {
         err.textContent = errorText(e);

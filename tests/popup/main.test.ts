@@ -306,7 +306,13 @@ describe("setup", () => {
     });
   });
 
-  it("asks for the configured origin alone, never the manifest wildcard", async () => {
+  it("asks for the configured host alone, never the manifest wildcard", async () => {
+    // The path is dropped, and so is the port: Firefox match patterns have no
+    // port component (bug 1362809), so `https://vault.example.net:8443/*` is
+    // not a tighter pattern but an INVALID one that permissions.request
+    // throws on — a self-hosted server on a non-standard port could never be
+    // set up. The host is still the whole of the grant, and it must match the
+    // pattern Controller.setup verifies with permissions.contains().
     install(defaultResponder({ status: () => EMPTY }), []);
     await main();
     fillSetup({ server: "https://vault.example.net:8443/vault/" });
@@ -314,7 +320,7 @@ describe("setup", () => {
 
     expect(permissionsRequest).toHaveBeenCalledTimes(1);
     expect(permissionsRequest).toHaveBeenCalledWith({
-      origins: ["https://vault.example.net:8443/*"],
+      origins: ["https://vault.example.net/*"],
     });
   });
 
