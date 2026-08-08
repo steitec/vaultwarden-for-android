@@ -65,6 +65,8 @@ function makeSpies(c: Controller) {
     matchesFor: vi.spyOn(c, "matchesFor").mockResolvedValue([]),
     fill: vi.spyOn(c, "fill").mockResolvedValue(undefined),
     totpFor: vi.spyOn(c, "totpFor").mockResolvedValue({ code: "123456", secondsRemaining: 30 }),
+    setup: vi.spyOn(c, "setup").mockResolvedValue(undefined),
+    syncNow: vi.spyOn(c, "syncNow").mockResolvedValue(undefined),
   };
 }
 
@@ -105,6 +107,8 @@ const EVERY_KIND: unknown[] = [
   { kind: "matches", pageUrl: "https://github.com/" },
   { kind: "fill", tabId: 7, itemId: "c1" },
   { kind: "totp", itemId: "c1" },
+  { kind: "setup", serverUrl: "https://v.test", email: "a@b.com", password: "p", pin: "135790" },
+  { kind: "sync" },
 ];
 
 describe("handleMessage sender verification", () => {
@@ -167,12 +171,71 @@ describe("handleMessage request validation", () => {
     ["fill with a NaN tabId", { kind: "fill", tabId: Number.NaN, itemId: "c1" }],
     ["fill with no itemId", { kind: "fill", tabId: 7 }],
     ["totp with no itemId", { kind: "totp" }],
-    // Declared in the brief's union but deliberately not part of this task's
-    // API: they arrive in Tasks 13/15 with their handlers. Until then they
-    // must be rejected outright, not dispatched into a runtime default.
+    // Declared in the brief's union but deliberately not part of the API
+    // yet: `copy` arrives in Task 15 with its handler. Until then it must
+    // be rejected outright, not dispatched into a runtime default.
     ["a copy request", { kind: "copy", itemId: "c1", field: "password" }],
-    ["a sync request", { kind: "sync" }],
-    ["a setup request", { kind: "setup", serverUrl: "https://v.test", email: "a@b.com", password: "p", pin: "135790" }],
+    // setup carries the master password and the server URL that host
+    // permission is requested for, so every field is validated here rather
+    // than letting a non-string reach `new URL()` or the KDF.
+    ["setup with no serverUrl", { kind: "setup", email: "a@b.com", password: "p", pin: "135790" }],
+    [
+      "setup with a non-string serverUrl",
+      { kind: "setup", serverUrl: 1, email: "a@b.com", password: "p", pin: "135790" },
+    ],
+    [
+      "setup with no email",
+      { kind: "setup", serverUrl: "https://v.test", password: "p", pin: "135790" },
+    ],
+    [
+      "setup with no password",
+      { kind: "setup", serverUrl: "https://v.test", email: "a@b.com", pin: "135790" },
+    ],
+    [
+      "setup with a null password",
+      { kind: "setup", serverUrl: "https://v.test", email: "a@b.com", password: null, pin: "135790" },
+    ],
+    [
+      "setup with no pin",
+      { kind: "setup", serverUrl: "https://v.test", email: "a@b.com", password: "p" },
+    ],
+    [
+      "setup with a non-string pin",
+      { kind: "setup", serverUrl: "https://v.test", email: "a@b.com", password: "p", pin: 135790 },
+    ],
+    [
+      "setup with a non-object twoFactor",
+      {
+        kind: "setup",
+        serverUrl: "https://v.test",
+        email: "a@b.com",
+        password: "p",
+        pin: "135790",
+        twoFactor: "654321",
+      },
+    ],
+    [
+      "setup with a twoFactor missing its provider",
+      {
+        kind: "setup",
+        serverUrl: "https://v.test",
+        email: "a@b.com",
+        password: "p",
+        pin: "135790",
+        twoFactor: { token: "654321" },
+      },
+    ],
+    [
+      "setup with a NaN twoFactor provider",
+      {
+        kind: "setup",
+        serverUrl: "https://v.test",
+        email: "a@b.com",
+        password: "p",
+        pin: "135790",
+        twoFactor: { token: "654321", provider: Number.NaN },
+      },
+    ],
   ];
 
   for (const [label, msg] of MALFORMED) {
@@ -214,6 +277,33 @@ describe("handleMessage routing", () => {
 
     await handleMessage(controller, { kind: "totp", itemId: "c1" }, SELF);
     expect(spies.totpFor).toHaveBeenCalledWith("c1");
+
+    await handleMessage(controller, { kind: "sync" }, SELF);
+    expect(spies.syncNow).toHaveBeenCalledTimes(1);
+    // syncNow takes no arguments: the retry bookkeeping is internal and is
+    // not something a message sender gets to set.
+    expect(spies.syncNow).toHaveBeenCalledWith();
+
+    await handleMessage(
+      controller,
+      {
+        kind: "setup",
+        serverUrl: "https://v.test",
+        email: "a@b.com",
+        password: "p",
+        pin: "135790",
+        twoFactor: { token: "654321", provider: 0 },
+      },
+      SELF,
+    );
+    // The envelope is not forwarded — only the named fields.
+    expect(spies.setup).toHaveBeenCalledWith({
+      serverUrl: "https://v.test",
+      email: "a@b.com",
+      password: "p",
+      pin: "135790",
+      twoFactor: { token: "654321", provider: 0 },
+    });
   });
 
   it("answers every kind with a promise, so the sender always gets a settled reply", async () => {
