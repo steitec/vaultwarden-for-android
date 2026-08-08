@@ -11,15 +11,24 @@ import { isRequest, type Response } from "./messages";
  * has no answer" and leaves the sender's `sendMessage` unresolved rather
  * than handing back an error that confirms the extension is installed.
  *
- * The sender check is the whole security boundary of the background page.
- * `browser.runtime.onMessage` is reachable by any OTHER installed extension
- * that knows this extension's ID (it is visible in about:debugging), and
- * every capability behind this switch is one it would otherwise get for
- * free: `{kind:"unlock",pin}` is an offline PIN brute-force oracle running
- * at native speed, `{kind:"list"}` enumerates the vault, and
- * `{kind:"fill"}` exfiltrates a password into any tab it likes. The same
- * check guards the content script's listener, for the same reason; this one
- * is a layer deeper and strictly more valuable to an attacker.
+ * The sender check narrows this listener to messages from this extension's
+ * own pages. It is defence in depth, not the sole thing standing between an
+ * attacker and the vault, and the comment that used to be here overstated it:
+ * under Firefox MV2 a message from a DIFFERENT extension is delivered to
+ * `runtime.onMessageExternal`, never to `onMessage`, and this extension
+ * registers no `onMessageExternal` listener and declares no
+ * `externally_connectable`. So there is no known cross-extension route into
+ * this switch today.
+ *
+ * The check stays regardless, because it costs one comparison and the
+ * capabilities behind this switch are exactly the ones worth protecting from
+ * any sender that turns out to reach them: `{kind:"unlock",pin}` is a PIN
+ * brute-force oracle running at native speed, `{kind:"list"}` enumerates the
+ * vault, and `{kind:"fill"}` pushes a password into a tab. What it does
+ * concretely defend against is a future manifest or listener change that
+ * opens such a route, and any in-extension page that should not be talking to
+ * the controller. The content script's listener carries the same check, for
+ * the same reason.
  */
 export function handleMessage(
   controller: Controller,
