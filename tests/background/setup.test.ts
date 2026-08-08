@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { Controller } from "../../src/background/controller";
 import { Session } from "../../src/session/session";
-import { TwoFactorRequiredError, InvalidCredentialsError } from "../../src/api/identity";
+import { InvalidCredentialsError } from "../../src/api/identity";
 import {
   DEFAULT_LOCK_TIMEOUT_MINUTES,
   DEFAULT_REQUIRE_MASTER_PASSWORD_ON_RESTART,
@@ -372,23 +372,54 @@ describe("Controller.setup", () => {
     expect(h.stored()).toBeNull();
   }, 30000);
 
-  it("lets a 2FA challenge through by type instead of collapsing it into a login failure", async () => {
-    await stubServer({ token: { status: 400, body: { TwoFactorProviders: [0] } } });
+  it("reports a 2FA challenge as a resolved value carrying the server's provider list", async () => {
+    // Not a rejection: error CLASSES do not survive runtime.sendMessage —
+    // Firefox delivers a plain Error with the message only — so
+    // TwoFactorRequiredError.providers would be lost on the way to the popup
+    // and the popup would be left matching on message text. The providers
+    // here are the server's answer, which is why the fixture uses a list a
+    // hardcoded [0, 1] could not produce.
+    await stubServer({ token: { status: 400, body: { TwoFactorProviders: [1] } } });
     stubBrowser();
     const h = makeHarness();
     await h.controller.init();
 
-    const err = await h.controller
-      .setup({ serverUrl: SERVER, email: "a@b.com", password: PASSWORD, pin: PIN })
-      .then(
-        () => null,
-        (e: unknown) => e,
-      );
+    const result = await h.controller.setup({
+      serverUrl: SERVER,
+      email: "a@b.com",
+      password: PASSWORD,
+      pin: PIN,
+    });
 
-    expect(err).toBeInstanceOf(TwoFactorRequiredError);
-    expect(err instanceof TwoFactorRequiredError ? err.providers : null).toEqual([0]);
+    expect(result).toEqual({ ok: false, reason: "twoFactor", providers: [1] });
     expect(h.stored()).toBeNull();
     expect(h.controller.status().state).toBe("empty");
+  }, 30000);
+
+  it("answers a completed login with a plain ok", async () => {
+    await stubServer();
+    stubBrowser();
+    const h = makeHarness();
+    await h.controller.init();
+
+    await expect(
+      h.controller.setup({ serverUrl: SERVER, email: "a@b.com", password: PASSWORD, pin: PIN }),
+    ).resolves.toEqual({ ok: true });
+  }, 30000);
+
+  it("still rejects every other login failure rather than folding it into the result", async () => {
+    // Only the 2FA challenge becomes a value. An InvalidCredentialsError
+    // reported as `{ ok: false }` would be indistinguishable from a 2FA
+    // prompt at the popup and would render a code box for an account that
+    // has no second factor.
+    await stubServer({ token: { status: 400, body: { error: "invalid_grant" } } });
+    stubBrowser();
+    const h = makeHarness();
+    await h.controller.init();
+
+    await expect(
+      h.controller.setup({ serverUrl: SERVER, email: "a@b.com", password: "nope", pin: PIN }),
+    ).rejects.toBeInstanceOf(InvalidCredentialsError);
   }, 30000);
 
   it("surfaces bad credentials field-agnostically and stores nothing", async () => {

@@ -92,20 +92,124 @@ body {
 
 .empty,
 .message,
-.placeholder,
-.placeholder-hint {
+.screen-title,
+.screen-hint {
   padding: var(--pad);
   margin: 0;
 }
 .empty,
-.placeholder-hint {
+.screen-hint {
   opacity: 0.7;
   font-size: 14px;
 }
-.placeholder {
+.screen-title {
   font-weight: 600;
   padding-bottom: 0;
 }
 .message-error {
   color: var(--danger);
+}
+
+/* Forms: one field per row, 16px inputs so mobile browsers do not zoom on
+   focus, and controls tall enough to hit with a thumb. */
+.field {
+  display: block;
+  padding: var(--pad);
+  padding-bottom: 0;
+}
+.field-label {
+  display: block;
+  font-size: 13px;
+  opacity: 0.8;
+}
+.field input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 4px;
+  padding: 12px;
+  font: inherit;
+  font-size: 16px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+}
+
+.choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px var(--pad);
+  min-height: 44px;
+}
+
+.action {
+  padding: 12px 16px;
+  min-height: 44px;
+  font: inherit;
+  font-size: 15px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+.action:active {
+  background: rgba(128, 128, 128, 0.15);
+}
+.action[hidden] {
+  display: none;
+}
+.action-primary {
+  display: block;
+  width: calc(100% - 2 * var(--pad));
+  margin: var(--pad);
+  font-weight: 600;
+}
+.action-danger {
+  color: var(--danger);
+}
+
+.error,
+.warn {
+  margin: 0;
+  padding: var(--pad);
+  padding-bottom: 0;
+  font-size: 14px;
+}
+.error:empty {
+  display: none;
+}
+.error {
+  color: var(--danger);
+}
+.warn {
+  color: #a06000;
+}
+
+.settings {
+  display: block;
+  border-bottom: 1px solid var(--rule);
+}
+.settings[hidden] {
+  display: none;
+}
+.settings-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: var(--pad);
+}
+.settings-row .action {
+  flex: 1 1 auto;
+}
+.settings-confirm {
+  padding-bottom: var(--pad);
+}
+.settings-confirm[hidden] {
+  display: none;
+}
+.settings-confirm .action {
+  margin: 8px var(--pad) 0;
 }

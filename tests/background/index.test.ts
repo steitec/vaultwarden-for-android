@@ -57,7 +57,14 @@ function makeSpies(c: Controller) {
   return {
     status: vi
       .spyOn(c, "status")
-      .mockReturnValue({ state: "locked", lastSyncMs: 1000, email: "a@b.com" }),
+      .mockReturnValue({
+        state: "locked",
+        lastSyncMs: 1000,
+        email: "a@b.com",
+        serverUrl: "https://v.example.net",
+        pinUnlockAvailable: true,
+        pinAttemptsRemaining: 5,
+      }),
     unlock: vi.spyOn(c, "unlock").mockResolvedValue(undefined),
     lock: vi.spyOn(c, "lock").mockReturnValue(undefined),
     signOut: vi.spyOn(c, "signOut").mockResolvedValue(undefined),
@@ -65,7 +72,7 @@ function makeSpies(c: Controller) {
     matchesFor: vi.spyOn(c, "matchesFor").mockResolvedValue([]),
     fill: vi.spyOn(c, "fill").mockResolvedValue(undefined),
     totpFor: vi.spyOn(c, "totpFor").mockResolvedValue({ code: "123456", secondsRemaining: 30 }),
-    setup: vi.spyOn(c, "setup").mockResolvedValue(undefined),
+    setup: vi.spyOn(c, "setup").mockResolvedValue({ ok: true }),
     syncNow: vi.spyOn(c, "syncNow").mockResolvedValue(undefined),
   };
 }
@@ -135,6 +142,9 @@ describe("handleMessage sender verification", () => {
       state: "locked",
       lastSyncMs: 1000,
       email: "a@b.com",
+      serverUrl: "https://v.example.net",
+      pinUnlockAvailable: true,
+      pinAttemptsRemaining: 5,
     });
     expect(spies.status).toHaveBeenCalled();
   });
