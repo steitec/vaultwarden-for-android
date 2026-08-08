@@ -18,9 +18,38 @@ export type Status = {
   state: "empty" | "locked" | "unlocked";
   lastSyncMs: number | null;
   email: string | null;
+  /** Prefills the sign-in form when a locked vault has to re-authenticate. */
+  serverUrl: string | null;
+  /**
+   * Whether a PIN unlock can succeed at all. False for a locked vault whose
+   * wrapped key a lockout dropped, and for the whole browser run after a
+   * restart when the account requires the master password. The popup routes
+   * on this: an unlock screen that can never succeed is a dead end.
+   */
+  pinUnlockAvailable: boolean;
+  /** Tries left before the wrapped key is dropped. Never negative. */
+  pinAttemptsRemaining: number;
 };
 
 export type TotpCode = { code: string; secondsRemaining: number };
+
+/**
+ * What `setup` answers with.
+ *
+ * A 2FA challenge is a resolved VALUE, not a rejection, because error
+ * classes do not survive `runtime.sendMessage`: Firefox structured-clones
+ * the rejection into a plain Error carrying the message alone, so
+ * `TwoFactorRequiredError.providers` — the server's list of methods the
+ * account actually has — never reaches the popup. Matching on the message
+ * text instead would be fragile and would still leave the popup guessing at
+ * the providers.
+ *
+ * Only the challenge is a value. Every other login failure still rejects, so
+ * that a wrong password cannot be mistaken for a 2FA prompt.
+ */
+export type SetupResult =
+  | { ok: true }
+  | { ok: false; reason: "twoFactor"; providers: number[] };
 
 /**
  * Every request kind here has a handler in background/index.ts, and the
@@ -55,7 +84,7 @@ export type Request =
   | { kind: "sync" };
 
 /** `void` covers the kinds that answer with an acknowledgement only. */
-export type Response = Status | ItemSummary[] | TotpCode | void;
+export type Response = Status | ItemSummary[] | TotpCode | SetupResult | void;
 
 function isString(v: unknown): v is string {
   return typeof v === "string";

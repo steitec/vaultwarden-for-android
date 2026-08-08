@@ -1,4 +1,12 @@
-import type { ItemSummary, Request, Status } from "../background/messages";
+import type { ItemSummary, Request, SetupResult, Status } from "../background/messages";
+import { errorText } from "./errors";
+import {
+  renderSettings,
+  renderSetup,
+  renderTwoFactor,
+  renderUnlock,
+  type SetupValues,
+} from "./screens";
 
 /**
  * The popup: a single-column, touch-sized list of vault entries.
@@ -76,7 +84,31 @@ function isStatus(v: unknown): v is Status {
     return false;
   if (!("email" in v)) return false;
   if (v.email !== null && typeof v.email !== "string") return false;
+  if (!("serverUrl" in v)) return false;
+  if (v.serverUrl !== null && typeof v.serverUrl !== "string") return false;
+  // These two pick the screen. Letting a status through without them and
+  // filling in a default here would mean guessing whether the PIN pad can
+  // work at all, and guessing wrong strands the user on a form that can
+  // never succeed.
+  if (!("pinUnlockAvailable" in v) || typeof v.pinUnlockAvailable !== "boolean") return false;
+  if (!("pinAttemptsRemaining" in v)) return false;
+  if (typeof v.pinAttemptsRemaining !== "number" || !Number.isFinite(v.pinAttemptsRemaining))
+    return false;
   return true;
+}
+
+/**
+ * A 2FA challenge arrives as a resolved value rather than an exception, so
+ * this is a real boundary that needs a real guard — including the provider
+ * list, which is forwarded to the server as numbers.
+ */
+function isSetupResult(v: unknown): v is SetupResult {
+  if (typeof v !== "object" || v === null) return false;
+  if (!("ok" in v) || typeof v.ok !== "boolean") return false;
+  if (v.ok) return true;
+  if (!("reason" in v) || v.reason !== "twoFactor") return false;
+  if (!("providers" in v) || !Array.isArray(v.providers)) return false;
+  return v.providers.every((p: unknown) => typeof p === "number" && Number.isFinite(p));
 }
 
 function isItemSummary(v: unknown): v is ItemSummary {
@@ -105,16 +137,10 @@ async function requestItems(req: Request): Promise<ItemSummary[]> {
   return answer;
 }
 
-/**
- * The message the user is shown for a failure.
- *
- * `.message` only, never `.cause`: a rejected fetch/JSON.parse deep in the
- * background page carries server-controlled text in the cause's message, and
- * this popup is not the place to render it.
- */
-function errorText(e: unknown): string {
-  if (e instanceof Error && e.message !== "") return e.message;
-  return "Something went wrong. Please try again.";
+async function requestSetup(req: Request): Promise<SetupResult> {
+  const answer = await request(req);
+  if (!isSetupResult(answer)) throw new UnexpectedResponseError();
+  return answer;
 }
 
 function humanAge(lastSyncMs: number, nowMs: number): string {
@@ -136,8 +162,8 @@ const STATE_LABEL = {
  * The header: lock state first, then how stale the offline copy is.
  *
  * The state belongs here and not just in the body because it is the one
- * thing that explains why the list is empty. Task 15 replaces the body for
- * the non-unlocked states; this header stays.
+ * thing that explains why the list is empty. It stays on screen for every
+ * body the router picks.
  */
 export function renderStatus(status: Status, container: HTMLElement): void {
   container.replaceChildren();
@@ -213,31 +239,6 @@ export function renderList(items: ItemSummary[], container: HTMLElement): void {
   }
 }
 
-/**
- * The body for a vault that cannot be listed yet.
- *
- * A locked vault is the DEFAULT state every time this popup opens — it is
- * the normal case, not an error, and must not be presented as one. Task 15
- * replaces these placeholders with the real unlock and setup screens; this
- * function is the seam.
- */
-export function renderLocked(state: "empty" | "locked", container: HTMLElement): void {
-  container.replaceChildren();
-
-  const headline = document.createElement("p");
-  headline.className = "placeholder";
-  headline.textContent = state === "empty" ? "No vault on this device yet." : "Your vault is locked.";
-  container.append(headline);
-
-  const hint = document.createElement("p");
-  hint.className = "placeholder-hint";
-  hint.textContent =
-    state === "empty"
-      ? "Sign in to your Vaultwarden server to get started."
-      : "Unlock with your PIN to see your entries.";
-  container.append(hint);
-}
-
 export function renderMessage(
   text: string,
   container: HTMLElement,
@@ -299,114 +300,279 @@ async function initialItems(pageUrl: string | null): Promise<ItemSummary[]> {
   return requestItems({ kind: "list", query: "" });
 }
 
+/**
+ * Wires the panel and routes to the screen the session state calls for.
+ *
+ * Routing is a function, not a straight line, because every successful
+ * setup/unlock/lock/sign-out has to land the user somewhere new. The
+ * alternative — `location.reload()` — throws the panel away and starts a
+ * second popup lifetime for what is a state change inside this one, and
+ * nothing on the way back can be observed or tested.
+ *
+ * `wired` is a closure local rather than module state: the list listeners
+ * must be attached exactly once no matter how often `route` runs, and a
+ * module-level flag would leak that "once" across tests.
+ */
 export async function main(): Promise<void> {
-  const root = document.getElementById("root");
-  const statusEl = document.getElementById("status");
-  if (root === null || statusEl === null) return;
+  const rootEl = document.getElementById("root");
+  const headerEl = document.getElementById("status");
+  if (rootEl === null || headerEl === null) return;
+  // Re-declared with the narrowed type rather than relied on by narrowing:
+  // the routing helpers below are hoisted function declarations, and
+  // TypeScript will not carry a null check into one of those.
+  const root: HTMLElement = rootEl;
+  const statusEl: HTMLElement = headerEl;
 
   const searchEl = document.getElementById("search");
   const search = searchEl instanceof HTMLInputElement ? searchEl : null;
   const banner = document.getElementById("error");
+  const settings = document.getElementById("settings");
 
-  let status: Status;
-  try {
-    status = await requestStatus();
-  } catch (e) {
-    statusEl.textContent = "Unavailable";
-    renderMessage(errorText(e), root, "error");
-    if (search !== null) search.disabled = true;
-    return;
-  }
-
-  renderStatus(status, statusEl);
-
-  // Locked is where this popup starts every single time. Asking a locked
-  // vault for `list`/`matches` earns a LockedError and a blank panel.
-  if (status.state !== "unlocked") {
-    if (search !== null) {
-      search.disabled = true;
-      search.hidden = true;
-    }
-    renderLocked(status.state, root);
-    return;
-  }
-
-  const tab = await activeTab();
-  const pageUrl = usablePageUrl(tab);
-  const tabId = tab?.id;
-
-  try {
-    renderList(await initialItems(pageUrl), root);
-  } catch (e) {
-    // The vault can lock between the status answer and this one — the idle
-    // timer does not wait for the popup.
-    renderMessage(errorText(e), root, "error");
-    return;
-  }
+  // Set by the vault screen and read by the click handler, which is wired
+  // once and outlives any single render.
+  let tabId: number | undefined;
+  let wired = false;
 
   // Renders are stamped so a slow answer for an earlier keystroke cannot
   // overwrite the list for a later one.
   let issued = 0;
   let rendered = 0;
 
-  if (search !== null) {
-    search.addEventListener("input", () => {
-      const seq = ++issued;
-      const query = search.value;
+  function hideSettings(): void {
+    if (settings === null) return;
+    settings.replaceChildren();
+    settings.hidden = true;
+  }
+
+  function wire(): void {
+    if (wired) return;
+    wired = true;
+
+    if (search !== null) {
+      search.addEventListener("input", () => {
+        const seq = ++issued;
+        const query = search.value;
+        void (async () => {
+          try {
+            const items = await requestItems({ kind: "list", query });
+            if (seq < rendered) return;
+            rendered = seq;
+            clearBanner(banner);
+            renderList(items, root);
+          } catch (e) {
+            if (seq < rendered) return;
+            rendered = seq;
+            renderMessage(errorText(e), root, "error");
+          }
+        })();
+      });
+    }
+
+    root.addEventListener("click", (event) => {
       void (async () => {
-        try {
-          const items = await requestItems({ kind: "list", query });
-          if (seq < rendered) return;
-          rendered = seq;
-          clearBanner(banner);
-          renderList(items, root);
-        } catch (e) {
-          if (seq < rendered) return;
-          rendered = seq;
-          renderMessage(errorText(e), root, "error");
+        const target = event.target;
+        if (!(target instanceof Element)) return;
+        const row = target.closest(".item");
+        if (!(row instanceof HTMLElement)) return;
+        const itemId = row.dataset.id;
+        if (itemId === undefined) return;
+
+        if (row.classList.contains("undecryptable")) {
+          showBanner(banner, "This entry could not be decrypted, so there is nothing to fill.");
+          return;
         }
+        if (tabId === undefined) {
+          showBanner(banner, "There is no page here to fill.");
+          return;
+        }
+
+        try {
+          // Exactly these three fields. The background reads the destination
+          // from the tab itself; a caller-supplied page URL was removed on
+          // purpose so that a caller cannot redirect credentials, and sending
+          // one back would be signalling the wrong intent even if it were
+          // ignored.
+          await request({ kind: "fill", tabId, itemId });
+        } catch (e) {
+          // The user must be told why. A silent no-op reads as "filled" and
+          // they will submit an empty form — or worse, assume a password
+          // reached a page that refused it for a security reason.
+          showBanner(banner, errorText(e));
+          return;
+        }
+        window.close();
       })();
     });
   }
 
-  root.addEventListener("click", (event) => {
-    void (async () => {
-      const target = event.target;
-      if (!(target instanceof Element)) return;
-      const row = target.closest(".item");
-      if (!(row instanceof HTMLElement)) return;
-      const itemId = row.dataset.id;
-      if (itemId === undefined) return;
+  async function showVault(): Promise<void> {
+    if (search !== null) {
+      search.disabled = false;
+      search.hidden = false;
+    }
+    if (settings !== null) {
+      settings.hidden = false;
+      renderSettings(settings, {
+        onSync: async () => {
+          try {
+            await request({ kind: "sync" });
+          } catch (e) {
+            // A failed sync must not wipe the list: the offline copy is
+            // still exactly as usable as it was a second ago.
+            showBanner(banner, errorText(e));
+            return;
+          }
+          await route();
+        },
+        onLock: async () => {
+          await request({ kind: "lock" });
+          await route();
+        },
+        onSignOut: async () => {
+          await request({ kind: "signOut" });
+          await route();
+        },
+      });
+    }
 
-      if (row.classList.contains("undecryptable")) {
-        showBanner(banner, "This entry could not be decrypted, so there is nothing to fill.");
+    const tab = await activeTab();
+    const pageUrl = usablePageUrl(tab);
+    tabId = tab?.id;
+
+    try {
+      renderList(await initialItems(pageUrl), root);
+    } catch (e) {
+      // The vault can lock between the status answer and this one — the idle
+      // timer does not wait for the popup.
+      renderMessage(errorText(e), root, "error");
+      return;
+    }
+
+    wire();
+    clearBanner(banner);
+    search?.focus();
+  }
+
+  /**
+   * Hands a completed sign-in form to the background page.
+   *
+   * `browser.permissions.request()` is the FIRST statement, before any
+   * await, and the form calls this synchronously from its submit listener.
+   * Firefox only honours the call while the user-input handler is still on
+   * the stack, and the gesture does not survive `runtime.sendMessage` — so
+   * the background page verifies the grant with `contains()` and this is the
+   * only place that can ask for it. `originPattern` was built by the form's
+   * synchronous pre-check for exactly this reason.
+   */
+  async function submitSetup(v: SetupValues): Promise<void> {
+    const granted = await browser.permissions.request({ origins: [v.originPattern] });
+    if (!granted) {
+      throw new Error(
+        `This add-on needs your permission to contact ${v.originPattern.replace(/\/\*$/, "")}. ` +
+          "Sign-in cannot continue without it.",
+      );
+    }
+
+    const first = await requestSetup({
+      kind: "setup",
+      serverUrl: v.serverUrl,
+      email: v.email,
+      password: v.password,
+      pin: v.pin,
+    });
+    if (first.ok) {
+      await route();
+      return;
+    }
+
+    // The second factor needs the same credentials again — the background
+    // page keeps nothing between attempts. They live in this closure only
+    // until the two-factor screen is replaced, which the next route() does.
+    renderTwoFactor(root, first.providers, async (twoFactor) => {
+      const second = await requestSetup({
+        kind: "setup",
+        serverUrl: v.serverUrl,
+        email: v.email,
+        password: v.password,
+        pin: v.pin,
+        twoFactor,
+      });
+      // A second challenge means the code was wrong or has expired. Throwing
+      // keeps the code box on screen with the message in it rather than
+      // rebuilding the form under the user's thumb.
+      if (!second.ok) throw new Error("That code was not accepted. Try again.");
+      await route();
+    });
+  }
+
+  async function submitUnlock(pin: string): Promise<void> {
+    try {
+      await request({ kind: "unlock", pin });
+    } catch (e) {
+      // A wrong PIN can be the LAST wrong PIN: Session drops the wrapped key
+      // once the attempts are exhausted, and the screen this rejection is
+      // about to land on could then never succeed again. Re-route in that
+      // case so the master-password form appears instead of a dead PIN pad.
+      const after = await requestStatus().catch(() => null);
+      if (after !== null && !(after.state === "locked" && after.pinUnlockAvailable)) {
+        await route(after);
         return;
       }
-      if (tabId === undefined) {
-        showBanner(banner, "There is no page here to fill.");
-        return;
-      }
+      throw e;
+    }
+    await route();
+  }
 
+  async function route(known?: Status): Promise<void> {
+    let status: Status;
+    if (known !== undefined) {
+      status = known;
+    } else {
       try {
-        // Exactly these three fields. The background reads the destination
-        // from the tab itself; a caller-supplied page URL was removed on
-        // purpose so that a caller cannot redirect credentials, and sending
-        // one back would be signalling the wrong intent even if it were
-        // ignored.
-        await request({ kind: "fill", tabId, itemId });
+        status = await requestStatus();
       } catch (e) {
-        // The user must be told why. A silent no-op reads as "filled" and
-        // they will submit an empty form — or worse, assume a password
-        // reached a page that refused it for a security reason.
-        showBanner(banner, errorText(e));
+        statusEl.textContent = "Unavailable";
+        renderMessage(errorText(e), root, "error");
+        if (search !== null) search.disabled = true;
+        hideSettings();
         return;
       }
-      window.close();
-    })();
-  });
+    }
 
-  clearBanner(banner);
-  search?.focus();
+    renderStatus(status, statusEl);
+
+    if (status.state === "unlocked") {
+      await showVault();
+      return;
+    }
+
+    // Asking a locked vault for `list`/`matches` earns a LockedError and a
+    // blank panel, so nothing below this line talks to the vault.
+    if (search !== null) {
+      search.disabled = true;
+      search.hidden = true;
+    }
+    hideSettings();
+    clearBanner(banner);
+
+    if (status.state === "locked" && status.pinUnlockAvailable) {
+      renderUnlock(root, submitUnlock, status.pinAttemptsRemaining);
+      return;
+    }
+
+    // Either there is no account at all, or there is one that the PIN can no
+    // longer open — a restart under the master-password policy, or a
+    // lockout. Both need the same form; only the wording and the prefill
+    // differ, and setup() adopts the new login over the old account either
+    // way.
+    renderSetup(root, submitSetup, {
+      mode: status.state === "empty" ? "new" : "reauthenticate",
+      serverUrl: status.serverUrl ?? "",
+      email: status.email ?? "",
+    });
+  }
+
+  await route();
 }
 
 // `main` runs when the popup document says so, never as an import side

@@ -1,4 +1,4 @@
-import { Session } from "../session/session";
+import { Session, MAX_PIN_ATTEMPTS } from "../session/session";
 import {
   DEFAULT_LOCK_TIMEOUT_MINUTES,
   DEFAULT_REQUIRE_MASTER_PASSWORD_ON_RESTART,
@@ -11,11 +11,11 @@ import { isSyncResponse } from "../api/types";
 import { performLogin } from "./login";
 import { wrapKeyWithPin } from "../session/pin";
 import { sync, UnauthorizedError } from "../api/sync";
-import { refreshToken } from "../api/identity";
+import { refreshToken, TwoFactorRequiredError } from "../api/identity";
 import { encryptToString, decryptToString, parseEncString } from "../crypto/encstring";
 import { utf8, zero } from "../crypto/bytes";
 import type { SymKey } from "../crypto/encstring";
-import type { ItemSummary, Status, TotpCode } from "./messages";
+import type { ItemSummary, SetupResult, Status, TotpCode } from "./messages";
 
 export class LockedError extends Error {
   constructor() {
@@ -116,6 +116,15 @@ export class Controller {
       state: this.session.state,
       lastSyncMs: s?.lastSyncMs ?? null,
       email: s?.email ?? null,
+      serverUrl: s?.serverUrl ?? null,
+      pinUnlockAvailable: this.session.pinUnlockAvailable,
+      // MAX_PIN_ATTEMPTS minus what has already been spent. Session charges
+      // the attempt BEFORE trying it and gives up once the count EXCEEDS
+      // the maximum, so a stored `n` leaves exactly `MAX - n` tries. Clamped
+      // because an over-counted record (a crash between charge and unwrap
+      // costs an attempt, deliberately) must not render as a negative
+      // countdown.
+      pinAttemptsRemaining: Math.max(0, MAX_PIN_ATTEMPTS - (s?.failedPinAttempts ?? 0)),
     };
   }
 
@@ -140,6 +149,12 @@ export class Controller {
    * save fails, the freshly derived keys are zeroed and the session is left
    * exactly as it was — locked or empty — rather than unlocked over an
    * account that was never persisted.
+   *
+   * A 2FA challenge comes back as a resolved `SetupResult` and not as a
+   * rejection; see `SetupResult` in messages.ts for why the exception cannot
+   * carry the provider list across the message boundary. Every other login
+   * failure — wrong credentials, an unreachable server, a refused host
+   * permission — still throws.
    */
   async setup(params: {
     serverUrl: string;
@@ -147,7 +162,7 @@ export class Controller {
     password: string;
     pin: string;
     twoFactor?: { token: string; provider: number };
-  }): Promise<void> {
+  }): Promise<SetupResult> {
     const serverUrl = params.serverUrl.trim().replace(/\/+$/, "");
 
     let parsed: URL;
@@ -170,15 +185,26 @@ export class Controller {
     if (!granted) throw new HostPermissionDeniedError(parsed.origin);
 
     const deviceId = crypto.randomUUID();
-    // TwoFactorRequiredError and InvalidCredentialsError propagate untouched
-    // from here; see login.ts for why neither may be reshaped.
-    const r = await performLogin({
-      serverUrl,
-      email: params.email,
-      password: params.password,
-      deviceId,
-      twoFactor: params.twoFactor,
-    });
+    // InvalidCredentialsError and everything else propagate untouched from
+    // here; see login.ts for why they may not be reshaped. Only the 2FA
+    // challenge is converted, and only into a value that carries the
+    // server's own provider list — the one piece of it that cannot survive
+    // as an exception.
+    let r;
+    try {
+      r = await performLogin({
+        serverUrl,
+        email: params.email,
+        password: params.password,
+        deviceId,
+        twoFactor: params.twoFactor,
+      });
+    } catch (e) {
+      if (e instanceof TwoFactorRequiredError) {
+        return { ok: false, reason: "twoFactor", providers: e.providers };
+      }
+      throw e;
+    }
 
     try {
       const state: StoredState = {
@@ -212,6 +238,7 @@ export class Controller {
     }
 
     await this.loadFromCache();
+    return { ok: true };
   }
 
   /**

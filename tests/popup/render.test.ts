@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 // inert — no request fired, no listener registered, no WebExtension API
 // touched — or these tests could not run at all. See the readyState guard at
 // the bottom of popup.ts.
-import { renderList, renderStatus, renderLocked, renderMessage } from "../../src/popup/popup";
+import { renderList, renderStatus, renderMessage } from "../../src/popup/popup";
 import type { ItemSummary, Status } from "../../src/background/messages";
 
 function requireEl(id: string): HTMLElement {
@@ -24,6 +24,19 @@ beforeEach(() => {
   document.body.innerHTML = `<div id="root"></div>`;
   root = requireEl("root");
 });
+
+/** A Status with the fields renderStatus does not care about filled in. */
+function status(over: Partial<Status> = {}): Status {
+  return {
+    state: "unlocked",
+    lastSyncMs: null,
+    email: "a@b.com",
+    serverUrl: "https://vault.example.net",
+    pinUnlockAvailable: true,
+    pinAttemptsRemaining: 5,
+    ...over,
+  };
+}
 
 const github: ItemSummary = {
   id: "1",
@@ -129,58 +142,41 @@ describe("renderList", () => {
 
 describe("renderStatus", () => {
   it("shows the offline age when a sync time is known", () => {
-    const s: Status = { state: "unlocked", lastSyncMs: Date.now() - 3600_000, email: "a@b.com" };
-    renderStatus(s, root);
+    renderStatus(status({ lastSyncMs: Date.now() - 3600_000 }), root);
     expect(root.textContent).toMatch(/last synced/i);
   });
 
   it("says never synced when there is no sync time", () => {
-    renderStatus({ state: "unlocked", lastSyncMs: null, email: "a@b.com" }, root);
+    renderStatus(status({ lastSyncMs: null }), root);
     expect(root.textContent).toMatch(/never synced/i);
   });
 
   it("reports the lock state, not only the sync age", () => {
-    renderStatus({ state: "locked", lastSyncMs: null, email: null }, root);
+    renderStatus(status({ state: "locked", email: null }), root);
     expect(root.textContent).toMatch(/locked/i);
 
-    renderStatus({ state: "empty", lastSyncMs: null, email: null }, root);
+    renderStatus(status({ state: "empty", email: null }), root);
     expect(root.textContent).toMatch(/not set up/i);
 
-    renderStatus({ state: "unlocked", lastSyncMs: Date.now(), email: null }, root);
+    renderStatus(status({ lastSyncMs: Date.now(), email: null }), root);
     expect(root.textContent).toMatch(/unlocked/i);
   });
 
   it("escapes the account email rather than injecting markup", () => {
-    renderStatus(
-      { state: "unlocked", lastSyncMs: null, email: "<img src=x onerror=alert(1)>@b.com" },
-      root,
-    );
+    renderStatus(status({ email: "<img src=x onerror=alert(1)>@b.com" }), root);
     expect(root.querySelector("img")).toBeNull();
     expect(one(root, ".status-email").textContent).toBe("<img src=x onerror=alert(1)>@b.com");
   });
 
   it("omits the email line entirely when there is no account", () => {
-    renderStatus({ state: "empty", lastSyncMs: null, email: null }, root);
+    renderStatus(status({ state: "empty", email: null }), root);
     expect(root.querySelector(".status-email")).toBeNull();
   });
 
   it("replaces the previous header instead of appending to it", () => {
-    renderStatus({ state: "locked", lastSyncMs: null, email: "a@b.com" }, root);
-    renderStatus({ state: "locked", lastSyncMs: null, email: "a@b.com" }, root);
+    renderStatus(status({ state: "locked" }), root);
+    renderStatus(status({ state: "locked" }), root);
     expect(root.querySelectorAll(".status-state")).toHaveLength(1);
-  });
-});
-
-describe("renderLocked", () => {
-  it("explains a locked vault without calling it an error", () => {
-    renderLocked("locked", root);
-    expect(root.textContent).toMatch(/locked/i);
-    expect(root.querySelector(".message-error")).toBeNull();
-  });
-
-  it("distinguishes a device with no vault at all", () => {
-    renderLocked("empty", root);
-    expect(root.textContent).toMatch(/sign in/i);
   });
 });
 

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { Controller } from "../../src/background/controller";
 import { wrapKeyWithPin } from "../../src/session/pin";
-import { Session } from "../../src/session/session";
+import { Session, MAX_PIN_ATTEMPTS } from "../../src/session/session";
 import type { StoredState } from "../../src/session/store";
 import type { SymKey } from "../../src/crypto/encstring";
 import { encryptToString } from "../../src/crypto/encstring";
@@ -169,6 +169,60 @@ describe("Controller", () => {
     await controller.unlock(PIN);
     expect(controller.status().lastSyncMs).toBe(1000);
     expect(controller.status().email).toBe("a@b.com");
+  }, 20000);
+
+  it("reports the account the setup screen has to prefill", async () => {
+    // A locked vault with no usable PIN is sent back to the master-password
+    // screen. Without the server address in the status there is nothing to
+    // prefill it with and the user has to retype it from memory.
+    const { controller } = await makeController();
+    expect(controller.status().serverUrl).toBe("https://v.example.net");
+    expect(controller.status().email).toBe("a@b.com");
+  }, 20000);
+
+  it("reports whether a PIN unlock can succeed at all", async () => {
+    const usable = await makeController();
+    expect(usable.controller.status().pinUnlockAvailable).toBe(true);
+
+    // No wrapped key left: a previous lockout consumed it. The PIN pad
+    // could never succeed again, and the popup routes on this flag.
+    const wiped = await makeController({ pinWrapped: null });
+    expect(wiped.controller.status().pinUnlockAvailable).toBe(false);
+
+    // The restart policy blocks the PIN for this whole browser run even
+    // though the wrapped key is still there.
+    const afterRestart = await makeController({ requireMasterPasswordOnRestart: true });
+    expect(afterRestart.controller.status().pinUnlockAvailable).toBe(false);
+  }, 30000);
+
+  it("counts the PIN attempts that are actually left", async () => {
+    // Session charges the attempt BEFORE trying it and gives up once
+    // failedPinAttempts exceeds MAX_PIN_ATTEMPTS, so a stored count of n
+    // leaves MAX - n tries. An off-by-one here shows the user a warning one
+    // attempt too early or, worse, one too late.
+    const fresh = await makeController();
+    expect(fresh.controller.status().pinAttemptsRemaining).toBe(MAX_PIN_ATTEMPTS);
+
+    const used = await makeController({ failedPinAttempts: 4 });
+    expect(used.controller.status().pinAttemptsRemaining).toBe(MAX_PIN_ATTEMPTS - 4);
+
+    const last = await makeController({ failedPinAttempts: MAX_PIN_ATTEMPTS - 1 });
+    expect(last.controller.status().pinAttemptsRemaining).toBe(1);
+    await expect(last.controller.unlock(PIN)).resolves.toBeUndefined();
+
+    // Never negative: a corrupt or over-counted record must not render as
+    // "-2 attempts remaining".
+    const over = await makeController({ failedPinAttempts: MAX_PIN_ATTEMPTS + 3 });
+    expect(over.controller.status().pinAttemptsRemaining).toBe(0);
+  }, 40000);
+
+  it("reports an empty device without inventing an account", async () => {
+    const { controller } = await makeController();
+    await controller.signOut();
+    const s = controller.status();
+    expect(s.serverUrl).toBeNull();
+    expect(s.pinUnlockAvailable).toBe(false);
+    expect(s.pinAttemptsRemaining).toBe(MAX_PIN_ATTEMPTS);
   }, 20000);
 
   it("returns only page matches for a tab url", async () => {
