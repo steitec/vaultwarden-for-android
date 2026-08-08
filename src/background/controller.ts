@@ -284,9 +284,17 @@ export class Controller {
       const t = await refreshToken(settings.serverUrl, rt);
       accessToken = t.access_token;
       this.session.accessToken = accessToken;
-      // Persist the rotated refresh token immediately. Vaultwarden
-      // invalidates the old one, so losing it here — e.g. because the sync
-      // below fails — would silently sign the user out at the next unlock.
+      // Persist whatever the server handed back, immediately, before the
+      // sync below can fail.
+      //
+      // The original rationale here — "Vaultwarden invalidates the old
+      // one" — was WRONG, and the integration suite disproved it: 1.37.1
+      // returns the byte-identical refresh token and the old one keeps
+      // working (see `does NOT rotate the refresh token` in
+      // tests/integration/live.test.ts). So on 1.37.1 this write is a
+      // no-op. It stays because a server that DOES rotate is the case that
+      // costs the user their session: dropping a rotated token here signs
+      // them out at the next unlock, and upstream Bitwarden rotates.
       await this.session.update({
         wrappedRefreshToken: await encryptToString(utf8(t.refresh_token), userKey),
       });
