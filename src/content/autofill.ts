@@ -220,11 +220,16 @@ function isFillMessage(v: unknown): v is FillMessage {
 //
 // Page JavaScript cannot reach this listener under MV2 -- content scripts
 // and pages are isolated worlds, and this listener is never registered
-// statically (see manifest.json's absent content_scripts). The threat this
-// sender check closes is a *different installed extension* that has
-// discovered this extension's ID (visible in about:debugging) and sends a
-// forged { kind: "fill" } message to exfiltrate whatever credential the
-// background page would have supplied.
+// statically (see manifest.json's absent content_scripts).
+//
+// The sender check is defence in depth. An earlier version of this comment
+// claimed it closes a hole through which a *different installed extension*
+// could send a forged { kind: "fill" }; that route does not exist as
+// described. Firefox MV2 delivers a cross-extension message to
+// `runtime.onMessageExternal`, not to `onMessage`, and nothing here registers
+// `onMessageExternal`. The check is kept because it is one comparison and it
+// pins the credential delivery to this extension's own background page no
+// matter what else ends up able to message this frame.
 browser.runtime.onMessage.addListener((msg: unknown, sender: browser.runtime.MessageSender) => {
   if (sender.id !== browser.runtime.id) return undefined;
   if (!isFillMessage(msg)) return undefined;
