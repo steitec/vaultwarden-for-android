@@ -310,10 +310,14 @@ describe("Controller.setup", () => {
     expect(contains.mock.invocationCallOrder[0]!).toBeLessThan(firstFetch);
   }, 30000);
 
-  it("keeps the port in the checked origin instead of widening to the bare host", async () => {
-    // `https://v.example.net/*` would NOT cover `https://v.example.net:8443`,
-    // and `https://v.example.net:*/*` would cover every port on that host.
-    // The pattern has to be the configured origin, exactly.
+  it("drops the port from the checked origin, because Firefox rejects one", async () => {
+    // Firefox match patterns have no port component at all (bug 1362809) --
+    // `https://v.example.net:8443/*` is not a narrower pattern, it is an
+    // INVALID one, and permissions.contains/request throw on it. So a
+    // self-hosted Vaultwarden on a non-standard port could never be set up.
+    // A portless host pattern is what Firefox accepts, and it already covers
+    // every port on that host; the host is still the only thing this add-on
+    // is ever granted.
     await stubServer();
     const { contains } = stubBrowser(true);
     const h = makeHarness();
@@ -326,7 +330,7 @@ describe("Controller.setup", () => {
       pin: PIN,
     });
 
-    expect(contains).toHaveBeenCalledWith({ origins: ["https://v.example.net:8443/*"] });
+    expect(contains).toHaveBeenCalledWith({ origins: ["https://v.example.net/*"] });
   }, 30000);
 
   it("aborts without contacting the server when host access has not been granted", async () => {

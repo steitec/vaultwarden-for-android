@@ -179,9 +179,17 @@ export class Controller {
     // request() in the background page throws "permissions.request may only
     // be called from a user input handler" for every real user. So the popup
     // does the asking from its own click handler and the background only
-    // verifies. `parsed.origin` already carries the port when the URL has
-    // one, keeping the pattern to exactly the configured host.
-    const granted = await browser.permissions.contains({ origins: [`${parsed.origin}/*`] });
+    // verifies.
+    //
+    // The pattern is the host WITHOUT the port, and must stay byte-identical
+    // to the one the popup requests. Firefox match patterns have no port
+    // component (bug 1362809): `https://host:8443/*` is not a tighter
+    // pattern, it is an invalid one that this call rejects outright, so a
+    // self-hosted server on a non-standard port would be impossible to set
+    // up. The grant is still one host and nothing else.
+    const granted = await browser.permissions.contains({
+      origins: [`https://${parsed.hostname}/*`],
+    });
     if (!granted) throw new HostPermissionDeniedError(parsed.origin);
 
     const deviceId = crypto.randomUUID();
