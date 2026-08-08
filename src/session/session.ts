@@ -60,6 +60,72 @@ export class Session {
     return !this.pinBlockedThisRun && (this.stored?.pinWrapped ?? null) !== null;
   }
 
+  /**
+   * Applies a partial change to the stored state and persists it.
+   *
+   * This exists because `settings` hands out a defensive CLONE (see above).
+   * Callers that read `settings`, mutate the result and then ask the session
+   * to save would write to a throwaway object and persist nothing — the
+   * failure mode is silent, so there must be no reason to try. Everything
+   * that needs to change persisted state goes through here.
+   *
+   * The clone is not negotiable: making `settings` return the live object
+   * would let any caller zero `failedPinAttempts` and defeat the PIN
+   * lockout.
+   *
+   * Saves BEFORE adopting the new object, so a rejecting store leaves the
+   * in-memory state matching what is actually on disk rather than a change
+   * that was never written.
+   */
+  async update(patch: Partial<StoredState>): Promise<void> {
+    if (this.stored === null) throw new Error("There is no account on this device");
+    const next: StoredState = { ...this.stored, ...patch };
+    await this.store.save(next);
+    this.stored = next;
+  }
+
+  /**
+   * Adopts the result of a full master-password login: persisted state and
+   * live keys, in one step.
+   *
+   * Atomic on purpose. Persisting first means a rejecting store leaves the
+   * session exactly as it was — locked or empty, with no keys resident —
+   * instead of a phantom "unlocked" session holding keys for an account
+   * that was never written to disk. The caller keeps ownership of the keys
+   * on that path and is expected to zero them.
+   *
+   * Any previously resident key material is zeroed before the new keys are
+   * adopted. Without that, running setup twice in one background-page
+   * lifetime (or running it while already unlocked) would orphan a buffer
+   * still holding live secret bytes — the same defect `unlockWithPin`
+   * guards against.
+   */
+  async adoptLogin(
+    state: StoredState,
+    keys: { userKey: SymKey; orgKeys: Map<string, SymKey>; accessToken: string },
+  ): Promise<void> {
+    await this.store.save(state);
+
+    if (this.userKey !== null) {
+      zero(this.userKey.encKey);
+      zero(this.userKey.macKey);
+    }
+    for (const k of this.orgKeys.values()) {
+      zero(k.encKey);
+      zero(k.macKey);
+    }
+
+    this.stored = state;
+    this.userKey = keys.userKey;
+    this.orgKeys = keys.orgKeys;
+    this.accessToken = keys.accessToken;
+    // A full master-password login satisfies the restart policy, so PIN
+    // unlock becomes available again for the rest of this run.
+    this.pinBlockedThisRun = false;
+    this.state = "unlocked";
+    this.touch();
+  }
+
   async unlockWithPin(pin: string): Promise<void> {
     if (this.pinBlockedThisRun) {
       throw new Error("Sign in with your master password after restarting Firefox.");

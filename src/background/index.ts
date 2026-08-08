@@ -47,6 +47,19 @@ export function handleMessage(
       return controller.fill(msg.tabId, msg.itemId);
     case "totp":
       return controller.totpFor(msg.itemId);
+    case "setup":
+      // Fields are forwarded explicitly rather than spreading `msg`, so the
+      // message envelope (`kind`, and anything a future sender bolts on)
+      // never reaches the login path.
+      return controller.setup({
+        serverUrl: msg.serverUrl,
+        email: msg.email,
+        password: msg.password,
+        pin: msg.pin,
+        twoFactor: msg.twoFactor,
+      });
+    case "sync":
+      return controller.syncNow();
   }
 
   // Compile-time exhaustiveness check. A new Request kind added without a

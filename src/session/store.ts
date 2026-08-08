@@ -20,6 +20,14 @@ export type StoredState = {
   requireMasterPasswordOnRestart: boolean;
 };
 
+/**
+ * Defaults applied when an account is first set up. Named and exported so
+ * the settings screen reads and changes them in one place rather than
+ * re-stating the numbers.
+ */
+export const DEFAULT_LOCK_TIMEOUT_MINUTES = 15;
+export const DEFAULT_REQUIRE_MASTER_PASSWORD_ON_RESTART = false;
+
 export type StateStore = {
   load(): Promise<StoredState | null>;
   save(state: StoredState): Promise<void>;

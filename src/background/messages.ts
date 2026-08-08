@@ -26,8 +26,14 @@ export type TotpCode = { code: string; secondsRemaining: number };
  * Every request kind here has a handler in background/index.ts, and the
  * dispatcher ends in a compile-time exhaustiveness check. Adding a kind to
  * this union without a matching case is therefore a build error, not a
- * runtime surprise — which is why `setup`, `sync` and `copy` are absent:
- * they arrive in Tasks 13 and 15 together with their handlers.
+ * runtime surprise — which is why `copy` is still absent: it arrives in
+ * Task 15 together with its handler.
+ *
+ * `setup` is the only message that carries the master password. It is a
+ * plain string and cannot be zeroed in JS once it has crossed this
+ * boundary; that is inherent to the runtime message API and accepted. What
+ * is NOT accepted is it ever reaching an error message, a console call, or
+ * `browser.storage` — see login.ts.
  */
 export type Request =
   | { kind: "status" }
@@ -37,13 +43,33 @@ export type Request =
   | { kind: "list"; query: string }
   | { kind: "matches"; pageUrl: string }
   | { kind: "fill"; tabId: number; itemId: string }
-  | { kind: "totp"; itemId: string };
+  | { kind: "totp"; itemId: string }
+  | {
+      kind: "setup";
+      serverUrl: string;
+      email: string;
+      password: string;
+      pin: string;
+      twoFactor?: { token: string; provider: number };
+    }
+  | { kind: "sync" };
 
 /** `void` covers the kinds that answer with an acknowledgement only. */
 export type Response = Status | ItemSummary[] | TotpCode | void;
 
 function isString(v: unknown): v is string {
   return typeof v === "string";
+}
+
+/**
+ * The optional second-factor payload. `provider` is forwarded to the server
+ * as a numeric provider id, so a NaN/Infinity here would become the string
+ * "NaN" in the token request rather than being rejected at the boundary.
+ */
+function isTwoFactor(v: unknown): v is { token: string; provider: number } {
+  if (typeof v !== "object" || v === null) return false;
+  if (!("token" in v) || !("provider" in v)) return false;
+  return isString(v.token) && typeof v.provider === "number" && Number.isFinite(v.provider);
 }
 
 /**
@@ -70,7 +96,24 @@ export function isRequest(v: unknown): v is Request {
     case "status":
     case "lock":
     case "signOut":
+    case "sync":
       return true;
+    case "setup":
+      // Every field is checked, not just presence: a non-string serverUrl
+      // would reach `new URL()`, a non-string password would reach the KDF,
+      // and a malformed twoFactor would reach the token request. An absent
+      // twoFactor is legal; a present-but-wrong-shaped one is not.
+      return (
+        "serverUrl" in v &&
+        isString(v.serverUrl) &&
+        "email" in v &&
+        isString(v.email) &&
+        "password" in v &&
+        isString(v.password) &&
+        "pin" in v &&
+        isString(v.pin) &&
+        (!("twoFactor" in v) || v.twoFactor === undefined || isTwoFactor(v.twoFactor))
+      );
     case "unlock":
       return "pin" in v && isString(v.pin);
     case "list":
