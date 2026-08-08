@@ -206,14 +206,21 @@ function makeHarness(initial: StoredState | null = null): Harness {
   };
 }
 
-/** Stubs the WebExtension surface setup() touches. */
+/**
+ * Stubs the WebExtension surface setup() touches.
+ *
+ * Only `permissions.contains` is stubbed, and deliberately so: `request()`
+ * may only be called from a user input handler, which the background page
+ * never has, so a background-side call to it must fail loudly here rather
+ * than be quietly satisfied by a stub.
+ */
 function stubBrowser(grant: boolean | Error = true) {
-  const request = vi.fn(async (_p: unknown) => {
+  const contains = vi.fn(async (_p: unknown) => {
     if (grant instanceof Error) throw grant;
     return grant;
   });
-  vi.stubGlobal("browser", { permissions: { request } });
-  return { request };
+  vi.stubGlobal("browser", { permissions: { contains } });
+  return { contains };
 }
 
 beforeEach(() => vi.unstubAllGlobals());
@@ -273,13 +280,17 @@ describe("Controller.setup", () => {
     ).resolves.toBe("the-refresh-token");
   }, 30000);
 
-  it("requests host access for the configured origin alone, before any network call", async () => {
+  it("checks host access for the configured origin alone, before any network call", async () => {
     // The manifest cannot name a runtime-determined origin, so it declares
     // a pattern; the extension must only ever hold the single origin the
-    // user configured. Requesting it before the first request also means a
-    // declined prompt leaks nothing to the server.
+    // user configured. Checking it before the first request also means a
+    // missing grant leaks nothing to the server.
+    //
+    // This is `contains`, not `request`: Firefox refuses request() outside a
+    // user input handler and the gesture does not cross runtime.sendMessage,
+    // so the popup asks and the background verifies.
     const server = await stubServer();
-    const { request } = stubBrowser(true);
+    const { contains } = stubBrowser(true);
     const h = makeHarness();
     await h.controller.init();
 
@@ -290,16 +301,35 @@ describe("Controller.setup", () => {
       pin: PIN,
     });
 
-    expect(request).toHaveBeenCalledTimes(1);
-    expect(request).toHaveBeenCalledWith({ origins: ["https://v.example.net/*"] });
+    expect(contains).toHaveBeenCalledTimes(1);
+    expect(contains).toHaveBeenCalledWith({ origins: ["https://v.example.net/*"] });
     expect(server.calls.length).toBeGreaterThan(0);
     // Ordering: the permission call resolved before the first fetch. The
     // spy's invocationCallOrder is the reliable witness for that.
     const firstFetch = vi.mocked(fetch).mock.invocationCallOrder[0]!;
-    expect(request.mock.invocationCallOrder[0]!).toBeLessThan(firstFetch);
+    expect(contains.mock.invocationCallOrder[0]!).toBeLessThan(firstFetch);
   }, 30000);
 
-  it("aborts without contacting the server when the user declines host access", async () => {
+  it("keeps the port in the checked origin instead of widening to the bare host", async () => {
+    // `https://v.example.net/*` would NOT cover `https://v.example.net:8443`,
+    // and `https://v.example.net:*/*` would cover every port on that host.
+    // The pattern has to be the configured origin, exactly.
+    await stubServer();
+    const { contains } = stubBrowser(true);
+    const h = makeHarness();
+    await h.controller.init();
+
+    await h.controller.setup({
+      serverUrl: "https://v.example.net:8443",
+      email: "a@b.com",
+      password: PASSWORD,
+      pin: PIN,
+    });
+
+    expect(contains).toHaveBeenCalledWith({ origins: ["https://v.example.net:8443/*"] });
+  }, 30000);
+
+  it("aborts without contacting the server when host access has not been granted", async () => {
     const server = await stubServer();
     stubBrowser(false);
     const h = makeHarness();
@@ -309,16 +339,18 @@ describe("Controller.setup", () => {
       h.controller.setup({ serverUrl: SERVER, email: "a@b.com", password: PASSWORD, pin: PIN }),
     ).rejects.toThrow(/permission/i);
 
+    // Not one byte left the device: no prelogin, no token request, nothing.
     expect(server.calls).toEqual([]);
+    expect(fetch).not.toHaveBeenCalled();
     expect(h.stored()).toBeNull();
     expect(h.controller.status().state).toBe("empty");
     expect(h.session.userKey).toBeNull();
   }, 30000);
 
-  it("refuses a non-https server url outright, without asking for permission", async () => {
+  it("refuses a non-https server url outright, without checking permission", async () => {
     // A master password must never be posted over plain http.
     const server = await stubServer();
-    const { request } = stubBrowser(true);
+    const { contains } = stubBrowser(true);
     const h = makeHarness();
     await h.controller.init();
 
@@ -335,7 +367,7 @@ describe("Controller.setup", () => {
       ).rejects.toThrow(/https/i);
     }
 
-    expect(request).not.toHaveBeenCalled();
+    expect(contains).not.toHaveBeenCalled();
     expect(server.calls).toEqual([]);
     expect(h.stored()).toBeNull();
   }, 30000);
