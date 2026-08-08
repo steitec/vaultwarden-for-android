@@ -1,0 +1,111 @@
+/* Sized for a phone held in one hand: single column, everything tappable,
+   nothing that depends on hover or a pointer. */
+:root {
+  color-scheme: light dark;
+  --pad: 12px;
+  --rule: rgba(128, 128, 128, 0.25);
+  --danger: #b3261e;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  font: 16px/1.4 system-ui, sans-serif;
+}
+
+.status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: var(--pad);
+  font-size: 13px;
+  opacity: 0.75;
+}
+.status-state {
+  font-weight: 600;
+}
+.status-email {
+  /* An email is long and the panel is narrow; never let it push the layout. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.search {
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--pad);
+  font-size: 16px; /* 16px keeps mobile browsers from zooming on focus */
+  border: 0;
+  border-bottom: 1px solid var(--rule);
+  background: none;
+  color: inherit;
+}
+.search[hidden] {
+  display: none;
+}
+
+.banner {
+  margin: 0;
+  padding: var(--pad);
+  font-size: 14px;
+  color: var(--danger);
+  border-bottom: 1px solid var(--rule);
+}
+.banner[hidden] {
+  display: none;
+}
+
+.item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: var(--pad);
+  min-height: 56px; /* comfortable tap target */
+  border: 0;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.2);
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.item:active {
+  background: rgba(128, 128, 128, 0.15);
+}
+.item-name {
+  display: block;
+  font-weight: 600;
+}
+.item-username {
+  display: block;
+  font-size: 13px;
+  opacity: 0.7;
+}
+.item-totp {
+  font-size: 12px;
+  opacity: 0.7;
+}
+.item.undecryptable .item-name {
+  color: var(--danger);
+}
+
+.empty,
+.message,
+.placeholder,
+.placeholder-hint {
+  padding: var(--pad);
+  margin: 0;
+}
+.empty,
+.placeholder-hint {
+  opacity: 0.7;
+  font-size: 14px;
+}
+.placeholder {
+  font-weight: 600;
+  padding-bottom: 0;
+}
+.message-error {
+  color: var(--danger);
+}
