@@ -90,10 +90,14 @@ describe("renderSetup", () => {
     });
   });
 
-  it("keeps the port in the origin pattern instead of widening to the bare host", async () => {
-    // `https://v.example.net/*` does not cover `:8443`, and a `:*` pattern
-    // would cover every port on the host. The grant has to be the configured
-    // origin, exactly — same rule the background page verifies.
+  it("drops the port from the origin pattern, because Firefox rejects one", async () => {
+    // Firefox match patterns have no port component (bug 1362809), so
+    // `https://vault.example.net:8443/*` is not a tighter grant — it is an
+    // invalid pattern that permissions.request() throws on, which would make
+    // a self-hosted server on a non-standard port impossible to sign in to.
+    // The portless host pattern is what Firefox accepts, and it has to be
+    // byte-identical to the one the background page verifies with
+    // permissions.contains().
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     renderSetup(root, onSubmit);
     fillSetup({ server: "https://vault.example.net:8443/vault/" });
@@ -101,7 +105,7 @@ describe("renderSetup", () => {
     await Promise.resolve();
 
     expect(onSubmit.mock.calls[0]?.[0]).toMatchObject({
-      originPattern: "https://vault.example.net:8443/*",
+      originPattern: "https://vault.example.net/*",
     });
   });
 
