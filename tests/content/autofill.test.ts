@@ -8,7 +8,25 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 // -- so the module must be loaded via a dynamic `import()` after the stub
 // is in place. This is a test-environment shim only; the source module
 // still assumes the real WebExtension `browser` global at runtime.
-vi.stubGlobal("browser", { runtime: { onMessage: { addListener: () => {} } } });
+//
+// The stub also captures the registered listener and fixes `runtime.id`, so
+// the sender-verification tests below can invoke the real listener directly
+// with a matching or foreign `sender.id`.
+const THIS_EXTENSION_ID = "this-extension-id";
+let registeredListener:
+  | ((msg: unknown, sender: { id?: string }) => unknown)
+  | undefined;
+
+vi.stubGlobal("browser", {
+  runtime: {
+    id: THIS_EXTENSION_ID,
+    onMessage: {
+      addListener: (fn: (msg: unknown, sender: { id?: string }) => unknown) => {
+        registeredListener = fn;
+      },
+    },
+  },
+});
 
 const { findLoginFields, fillFields } = await import("../../src/content/autofill");
 
@@ -69,6 +87,109 @@ describe("findLoginFields", () => {
     const f = findLoginFields(document);
     expect(f.username).toBeNull();
     expect(f.password).toBeNull();
+  });
+
+  // Decoy fields hidden via a wrapper (not the input itself) must be
+  // skipped in favour of the visible field -- asserting only that the
+  // decoy is untouched would pass trivially if nothing were selected at
+  // all, so each case asserts the VISIBLE field is the one chosen.
+  it("skips a password decoy hidden by an ancestor div using display:none", () => {
+    setBody(`
+      <div style="display:none">
+        <input type="text" name="evil-user">
+        <input type="password" name="evil-pass" id="evilpass">
+      </div>
+      <form>
+        <input type="text" name="real-user" id="realuser">
+        <input type="password" name="real-pass" id="realpass">
+      </form>
+    `);
+    const f = findLoginFields(document);
+    expect(f.username!.id).toBe("realuser");
+    expect(f.password!.id).toBe("realpass");
+  });
+
+  it("skips a decoy hidden by an ancestor div positioned off-screen (visibility:hidden)", () => {
+    setBody(`
+      <div style="visibility:hidden;position:absolute;left:-9999px;top:-9999px">
+        <input type="text" name="evil-user">
+        <input type="password" name="evil-pass" id="evilpass">
+      </div>
+      <form>
+        <input type="text" name="real-user" id="realuser">
+        <input type="password" name="real-pass" id="realpass">
+      </form>
+    `);
+    const f = findLoginFields(document);
+    expect(f.username!.id).toBe("realuser");
+    expect(f.password!.id).toBe("realpass");
+  });
+
+  it("skips a decoy hidden by an ancestor div with visibility:collapse", () => {
+    setBody(`
+      <div style="visibility:collapse">
+        <input type="text" name="evil-user">
+        <input type="password" name="evil-pass" id="evilpass">
+      </div>
+      <form>
+        <input type="text" name="real-user" id="realuser">
+        <input type="password" name="real-pass" id="realpass">
+      </form>
+    `);
+    const f = findLoginFields(document);
+    expect(f.username!.id).toBe("realuser");
+    expect(f.password!.id).toBe("realpass");
+  });
+
+  it("skips a decoy hidden by an ancestor div with opacity:0", () => {
+    setBody(`
+      <div style="opacity:0">
+        <input type="text" name="evil-user">
+        <input type="password" name="evil-pass" id="evilpass">
+      </div>
+      <form>
+        <input type="text" name="real-user" id="realuser">
+        <input type="password" name="real-pass" id="realpass">
+      </form>
+    `);
+    const f = findLoginFields(document);
+    expect(f.username!.id).toBe("realuser");
+    expect(f.password!.id).toBe("realpass");
+  });
+
+  it("skips a decoy hidden by the `hidden` attribute on an ancestor div", () => {
+    setBody(`
+      <div hidden>
+        <input type="text" name="evil-user">
+        <input type="password" name="evil-pass" id="evilpass">
+      </div>
+      <form>
+        <input type="text" name="real-user" id="realuser">
+        <input type="password" name="real-pass" id="realpass">
+      </form>
+    `);
+    const f = findLoginFields(document);
+    expect(f.username!.id).toBe("realuser");
+    expect(f.password!.id).toBe("realpass");
+  });
+
+  it("scopes the username fallback to the password field's own form, not the whole document", () => {
+    setBody(`
+      <input type="text" name="unrelated-newsletter-signup">
+      <form>
+        <input type="password" name="pw">
+        <input type="text" name="realuser">
+      </form>
+    `);
+    expect(findLoginFields(document).username!.getAttribute("name")).toBe("realuser");
+  });
+
+  it("returns a null username rather than a cross-form guess when no same-form candidate exists", () => {
+    setBody(`
+      <input type="text" name="unrelated-newsletter-signup">
+      <form><input type="password" name="pw"></form>
+    `);
+    expect(findLoginFields(document).username).toBeNull();
   });
 });
 
@@ -134,5 +255,28 @@ describe("fillFields", () => {
     expect(r).toEqual({ filledUsername: false, filledPassword: false });
     expect(document.querySelector<HTMLInputElement>('[name="u"]')!.value).toBe("existing");
     expect(document.querySelector<HTMLInputElement>('[name="p"]')!.value).toBe("oldpw");
+  });
+});
+
+describe("onMessage listener (sender verification)", () => {
+  it("ignores a fill message from a foreign sender (a different installed extension)", async () => {
+    setBody(`<form><input type="text" name="u"><input type="password" name="p"></form>`);
+    const result = await registeredListener!(
+      { kind: "fill", username: "octocat", password: "hunter2" },
+      { id: "some-other-extensions-id" },
+    );
+    expect(result).toBeUndefined();
+    expect(document.querySelector<HTMLInputElement>('[name="u"]')!.value).toBe("");
+    expect(document.querySelector<HTMLInputElement>('[name="p"]')!.value).toBe("");
+  });
+
+  it("acts on a fill message whose sender is this extension itself", async () => {
+    setBody(`<form><input type="text" name="u"><input type="password" name="p"></form>`);
+    const result = await registeredListener!(
+      { kind: "fill", username: "octocat", password: "hunter2" },
+      { id: THIS_EXTENSION_ID },
+    );
+    expect(result).toEqual({ filledUsername: true, filledPassword: true });
+    expect(document.querySelector<HTMLInputElement>('[name="u"]')!.value).toBe("octocat");
   });
 });
