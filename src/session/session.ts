@@ -20,6 +20,25 @@ export class Session {
   orgKeys: Map<string, SymKey> = new Map();
   accessToken: string | null = null;
 
+  /**
+   * Called whenever this session leaves the unlocked state.
+   *
+   * Zeroing the key buffers is only half of a lock. The plaintext those keys
+   * produced — every password and TOTP secret in the vault — lives in the
+   * owner (the Controller), which this class knows nothing about, and most
+   * locks do not go through the owner at all: the idle timer fires on its
+   * own, `signOut()` locks before it wipes the device, and `init()` locks a
+   * session that was still unlocked from a previous run. Without this hook
+   * the 15-minute idle timeout wipes the keys and leaves the entire vault in
+   * cleartext in the background page's heap for as long as Firefox keeps
+   * that page alive.
+   *
+   * Defaults to a no-op so a Session is usable on its own; the Controller
+   * assigns it in its constructor, which is the only place a Session ever
+   * acquires an owner.
+   */
+  onLock: () => void = () => {};
+
   private stored: StoredState | null = null;
   private lockTimer: ReturnType<typeof setTimeout> | null = null;
   private pinBlockedThisRun = false;
@@ -214,6 +233,47 @@ export class Session {
       this.lockTimer = null;
     }
     this.state = this.stored === null ? "empty" : "locked";
+
+    // Last: the keys are already zeroed and the state is already consistent,
+    // so whatever the owner does here — including throwing — cannot leave
+    // this session half-locked. Every path out of "unlocked" runs through
+    // here, which is what makes the notification exhaustive rather than a
+    // per-caller courtesy.
+    this.onLock();
+  }
+
+  /**
+   * Replaces this session's organization keys.
+   *
+   * Zeroes the buffers it is replacing, for the same reason `adoptLogin` and
+   * `unlockWithPin` do: dropping the reference to a Uint8Array that still
+   * holds live key bytes leaves them in the heap until the GC happens to
+   * run, which is not a schedule this extension controls.
+   *
+   * Refuses to install into a session that is no longer unlocked. Rebuilding
+   * organization keys is several awaits long (an RSA unwrap per
+   * organization) and the idle timer can fire anywhere in the middle of it;
+   * installing the result afterwards would leave a LOCKED session holding
+   * live organization keys that nothing would zero until the next lock. The
+   * rejected keys are zeroed here rather than handed back, because the
+   * caller has already lost its reference to them by the time it returns.
+   */
+  adoptOrgKeys(orgKeys: Map<string, SymKey>): void {
+    for (const k of this.orgKeys.values()) {
+      zero(k.encKey);
+      zero(k.macKey);
+    }
+
+    if (this.state !== "unlocked") {
+      for (const k of orgKeys.values()) {
+        zero(k.encKey);
+        zero(k.macKey);
+      }
+      this.orgKeys = new Map();
+      return;
+    }
+
+    this.orgKeys = orgKeys;
   }
 
   /**
