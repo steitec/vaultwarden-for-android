@@ -131,6 +131,50 @@ export async function unwrapOrgKey(
 }
 
 /**
+ * Unwraps every organization key an account holds, in one step: the RSA
+ * private key comes out from under the user key, and each organization key
+ * comes out from under that.
+ *
+ * Shared by the two places that have to do this — the master-password login
+ * and the offline-cache load after a PIN unlock — because they must agree on
+ * the failure behaviour, not merely on the happy path:
+ *
+ *  - No organizations means no private-key unwrap at all. An account in no
+ *    organization is the common case, and it must not be able to fail on a
+ *    `protectedPrivateKey` it never needs.
+ *  - One unreadable organization is skipped rather than fatal: its items
+ *    surface as undecryptable and the rest of the vault still loads.
+ *  - A private key that will not unwrap DOES throw. It is not per-org
+ *    damage, and the two callers want different things from it (the login
+ *    fails; the cache load treats every org item as undecryptable), so this
+ *    decides nothing on their behalf. That throw happens before any
+ *    organization key has been unwrapped, so it never orphans key material
+ *    the caller would have had to zero.
+ *
+ * `organizations` is structurally typed rather than imported from api/types:
+ * this module stays free of the API layer.
+ */
+export async function unwrapOrgKeyMap(
+  protectedPrivateKey: string,
+  organizations: readonly { id: string; key: string }[],
+  userKey: SymKey,
+): Promise<Map<string, SymKey>> {
+  const orgKeys = new Map<string, SymKey>();
+  if (organizations.length === 0) return orgKeys;
+
+  const privateKey = await unwrapPrivateKey(protectedPrivateKey, userKey);
+  for (const org of organizations) {
+    try {
+      orgKeys.set(org.id, await unwrapOrgKey(org.key, privateKey));
+    } catch {
+      // One unreadable organization must not prevent the rest of the vault
+      // from loading; its items surface as undecryptable.
+    }
+  }
+  return orgKeys;
+}
+
+/**
  * Newer items carry their own key, wrapped under the user key or, for
  * organization items, under that organization's key. Ignoring this field breaks
  * decryption of newer items only, so it must be handled from the start.

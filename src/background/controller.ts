@@ -13,6 +13,7 @@ import { wrapKeyWithPin } from "../session/pin";
 import { sync, UnauthorizedError } from "../api/sync";
 import { refreshToken, TwoFactorRequiredError } from "../api/identity";
 import { encryptToString, decryptToString, parseEncString } from "../crypto/encstring";
+import { unwrapOrgKeyMap } from "../crypto/keys";
 import { utf8, zero } from "../crypto/bytes";
 import type { SymKey } from "../crypto/encstring";
 import type { ItemSummary, SetupResult, Status, TotpCode } from "./messages";
@@ -100,9 +101,27 @@ function isFillableOrigin(pageUrl: string): boolean {
 }
 
 export class Controller {
+  /**
+   * The decrypted vault: cleartext passwords and TOTP secrets for every
+   * entry. Nothing else in this process holds them, and they must not
+   * outlive the session's keys — see the `onLock` wiring below.
+   */
   private items: VaultItem[] = [];
 
-  constructor(private session: Session) {}
+  constructor(private session: Session) {
+    // The session leaves the unlocked state on paths that never touch this
+    // class: the idle timer fires on its own, and both `Session.signOut()`
+    // and `Session.init()`'s re-entrancy guard call `Session.lock()`
+    // directly. All of them zero the keys; none of them know about `items`.
+    //
+    // Wiring the hook in the constructor is what makes that impossible to
+    // get wrong: there is no Controller anywhere — in this codebase or in a
+    // test — that exists without it, so there is no "forgot to subscribe"
+    // state to review for.
+    session.onLock = () => {
+      this.items = [];
+    };
+  }
 
   async init(): Promise<void> {
     await this.session.init();
@@ -322,18 +341,24 @@ export class Controller {
     await this.loadFromCache();
   }
 
+  /**
+   * `items` is not cleared here, and that is deliberate: `Session.lock()`
+   * runs the `onLock` hook installed in the constructor, which clears it.
+   * Clearing it here as well would be a second mechanism doing the same job
+   * — and a second mechanism that keeps THIS path green would hide a broken
+   * hook on the paths that have no second mechanism, above all the idle
+   * timer.
+   */
   lock(): void {
-    this.items = [];
     this.session.lock();
   }
 
   /**
    * Wipes the device: decrypted items, the in-memory keys, and every
    * persisted secret. See Session.signOut for why locking alone is not
-   * enough.
+   * enough; it locks first, so the hook clears `items` here too.
    */
   async signOut(): Promise<void> {
-    this.items = [];
     await this.session.signOut();
   }
 
@@ -351,15 +376,17 @@ export class Controller {
    * and the keys say otherwise.
    */
   private async loadFromCache(): Promise<void> {
-    const cache = this.session.settings?.cipherCache;
-    if (cache == null || this.session.userKey === null) {
+    // One read of `settings`: it returns a fresh defensive clone per access.
+    const settings = this.session.settings;
+    const userKey = this.session.userKey;
+    if (settings === null || settings.cipherCache === null || userKey === null) {
       this.items = [];
       return;
     }
 
     let parsed: unknown;
     try {
-      parsed = JSON.parse(cache);
+      parsed = JSON.parse(settings.cipherCache);
     } catch {
       this.items = [];
       return;
@@ -369,7 +396,45 @@ export class Controller {
       return;
     }
 
-    this.items = await decryptVault(parsed, this.session.userKey, this.session.orgKeys);
+    // Rebuild the organization keys from the cache before decrypting it.
+    //
+    // `Session.lock()` zeroes and clears them, and `unlockWithPin` restores
+    // only the user key — nothing else ever repopulates the map. Without
+    // this, every organization cipher decrypts to the "cannot be decrypted"
+    // placeholder from the first idle lock onwards, until the user signs in
+    // with the master password again. Everything needed is in hand at this
+    // exact moment: the RSA private key (wrapped under the user key, in
+    // stored state) and each organization's key (wrapped under the RSA
+    // public key, in the cached sync payload).
+    //
+    // Unconditional, even when the map is already populated: this also runs
+    // on the sync path, and a sync that added the user to a NEW organization
+    // brings that organization's key with it. A rebuild that skipped a
+    // non-empty map would never pick it up.
+    try {
+      this.session.adoptOrgKeys(
+        await unwrapOrgKeyMap(
+          settings.protectedPrivateKey,
+          parsed.profile.organizations ?? [],
+          userKey,
+        ),
+      );
+    } catch {
+      // Never throws — see the doc comment above. A private key that will
+      // not unwrap makes the organization items undecryptable, which is
+      // exactly what the user sees today; it is not a reason to reject an
+      // unlock that has already handed out the user key. An empty map, not
+      // the stale one, so what the session holds always reflects the last
+      // rebuild rather than some earlier payload.
+      this.session.adoptOrgKeys(new Map());
+    }
+
+    const items = await decryptVault(parsed, userKey, this.session.orgKeys);
+    // The idle timer can fire during the decryption above. `onLock` has
+    // already emptied `items` by then, and assigning the freshly decrypted
+    // vault over the top would silently repopulate a locked controller with
+    // the plaintext the lock just discarded.
+    this.items = this.session.state === "unlocked" ? items : [];
   }
 
   async list(query: string): Promise<ItemSummary[]> {
