@@ -1,7 +1,7 @@
 import { prelogin, requestToken } from "../api/identity";
 import { sync } from "../api/sync";
 import { deriveMasterKey, deriveMasterPasswordHash, type KdfConfig } from "../crypto/kdf";
-import { unwrapUserKey, unwrapPrivateKey, unwrapOrgKey } from "../crypto/keys";
+import { unwrapUserKey, unwrapOrgKeyMap } from "../crypto/keys";
 import { zero } from "../crypto/bytes";
 import type { SymKey } from "../crypto/encstring";
 import type { LoginTokenResponse, SyncResponse } from "../api/types";
@@ -59,7 +59,9 @@ export async function performLogin(params: {
   const masterKey = await deriveMasterKey(params.password, params.email, kdf);
 
   let userKey: SymKey | null = null;
-  const orgKeys = new Map<string, SymKey>();
+  // Reassigned, not filled in place: unwrapOrgKeyMap builds its own map. The
+  // `finally` below zeroes whichever map this ends up holding.
+  let orgKeys = new Map<string, SymKey>();
   let transferred = false;
   try {
     const hash = await deriveMasterPasswordHash(masterKey, params.password);
@@ -80,18 +82,17 @@ export async function performLogin(params: {
     // is a well-formed vault. `organizations` stays optional-chained
     // because the guard permits an absent/null list — an account in no
     // organizations is the common case, not an error.
-    const orgs = payload.profile.organizations ?? [];
-    if (orgs.length > 0) {
-      const privateKey = await unwrapPrivateKey(tokens.PrivateKey, userKey);
-      for (const org of orgs) {
-        try {
-          orgKeys.set(org.id, await unwrapOrgKey(org.key, privateKey));
-        } catch {
-          // One unreadable organization must not prevent the rest of the
-          // vault from loading; its items surface as undecryptable.
-        }
-      }
-    }
+    //
+    // A private key that will not unwrap propagates and fails the whole
+    // login: it means the master password produced a user key that cannot
+    // read this account's own key material, which is not a state to sign in
+    // over. Individual organizations that fail are skipped inside the
+    // helper.
+    orgKeys = await unwrapOrgKeyMap(
+      tokens.PrivateKey,
+      payload.profile.organizations ?? [],
+      userKey,
+    );
 
     transferred = true;
     return { userKey, orgKeys, tokens, kdf, payload };

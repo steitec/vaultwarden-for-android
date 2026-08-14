@@ -176,6 +176,85 @@ describe("Session", () => {
     expect(allZero(orgKey.macKey)).toBe(true);
   }, 20000);
 
+  it("tells its owner it locked, on every path out of the unlocked state", async () => {
+    // Session.lock() zeroes the key buffers, but the plaintext those keys
+    // produced lives in the Controller, which the Session knows nothing
+    // about. The idle timer, signOut() and init()'s re-entrancy guard all
+    // reach lock() without anyone calling Controller.lock() first, so
+    // without this notification the 15-minute idle timeout leaves every
+    // cleartext password resident in the background page's heap.
+    const locks: string[] = [];
+    session.onLock = () => locks.push(session.state);
+
+    await session.init();
+    await session.unlockWithPin("135790");
+    session.lock();
+    expect(locks).toEqual(["locked"]);
+
+    // The idle timer.
+    vi.useFakeTimers();
+    try {
+      await session.unlockWithPin("135790");
+      vi.advanceTimersByTime(15 * 60 * 1000 + 1000);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(locks).toEqual(["locked", "locked"]);
+
+    // init() re-entered while unlocked.
+    await session.unlockWithPin("135790");
+    await session.init();
+    expect(locks).toEqual(["locked", "locked", "locked"]);
+
+    // signOut(), which locks before it wipes the device.
+    await session.unlockWithPin("135790");
+    await session.signOut();
+    expect(locks).toHaveLength(4);
+  }, 40000);
+
+  it("zeroes the organization keys it replaces", async () => {
+    // Same discipline as adoptLogin and unlockWithPin: dropping the
+    // reference to a Uint8Array that still holds live key bytes leaves it
+    // in the heap until the GC happens to run.
+    await session.init();
+    await session.unlockWithPin("135790");
+    const old: SymKey = {
+      encKey: new Uint8Array(32).fill(7),
+      macKey: new Uint8Array(32).fill(8),
+    };
+    session.orgKeys.set("org-1", old);
+
+    const fresh: SymKey = {
+      encKey: new Uint8Array(32).fill(9),
+      macKey: new Uint8Array(32).fill(10),
+    };
+    session.adoptOrgKeys(new Map([["org-1", fresh]]));
+
+    expect(allZero(old.encKey)).toBe(true);
+    expect(allZero(old.macKey)).toBe(true);
+    expect(session.orgKeys.get("org-1")).toBe(fresh);
+    expect(allZero(fresh.encKey)).toBe(false);
+  }, 20000);
+
+  it("refuses to install organization keys into a session that is no longer unlocked", async () => {
+    // Rebuilding the org keys is several awaits long (an RSA unwrap per
+    // organization), and the idle timer can fire in the middle of it.
+    // Installing the result afterwards would leave a LOCKED session holding
+    // live organization keys that nothing would zero until the next lock —
+    // precisely the state lock() exists to prevent.
+    await session.init();
+    const fresh: SymKey = {
+      encKey: new Uint8Array(32).fill(9),
+      macKey: new Uint8Array(32).fill(10),
+    };
+
+    session.adoptOrgKeys(new Map([["org-1", fresh]]));
+
+    expect(session.orgKeys.size).toBe(0);
+    expect(allZero(fresh.encKey)).toBe(true);
+    expect(allZero(fresh.macKey)).toBe(true);
+  });
+
   it("locks automatically once the idle timeout elapses", async () => {
     vi.useFakeTimers();
     try {

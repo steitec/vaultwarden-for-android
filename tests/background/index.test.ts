@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { Controller } from "../../src/background/controller";
 import { Session } from "../../src/session/session";
 import type { StoredState } from "../../src/session/store";
@@ -18,7 +18,7 @@ let registeredListener:
   | ((msg: unknown, sender: { id?: string }) => unknown)
   | undefined;
 
-vi.stubGlobal("browser", {
+const BROWSER_STUB = {
   runtime: {
     id: THIS_EXTENSION_ID,
     onMessage: {
@@ -28,12 +28,21 @@ vi.stubGlobal("browser", {
     },
   },
   storage: { local: { get: async () => ({}), set: async () => {}, remove: async () => {} } },
-});
+};
+vi.stubGlobal("browser", BROWSER_STUB);
 
 const { handleMessage } = await import("../../src/background/index");
 
 const SELF = { id: THIS_EXTENSION_ID };
 const FOREIGN = { id: "some-other-extensions-id" };
+
+/**
+ * The startup promise every dispatch waits on. These tests construct their
+ * own controller and await `init()` themselves, so the work it stands for is
+ * already done; the "background page startup" block at the bottom of this
+ * file is where the waiting itself is pinned.
+ */
+const READY: Promise<void> = Promise.resolve();
 
 const BASE_STATE: StoredState = {
   serverUrl: "https://v.example.net",
@@ -126,18 +135,18 @@ describe("handleMessage sender verification", () => {
     // {kind:"list"} enumerates the vault, and {kind:"fill"} exfiltrates a
     // password into a tab of the attacker's choosing.
     for (const msg of EVERY_KIND) {
-      expect(handleMessage(controller, msg, FOREIGN)).toBeUndefined();
+      expect(handleMessage(controller, msg, FOREIGN, READY)).toBeUndefined();
     }
     expectNothingDispatched();
   });
 
   it("ignores a request whose sender has no id at all (a content script or page)", async () => {
-    expect(handleMessage(controller, { kind: "list", query: "" }, {})).toBeUndefined();
+    expect(handleMessage(controller, { kind: "list", query: "" }, {}, READY)).toBeUndefined();
     expectNothingDispatched();
   });
 
   it("acts on a request whose sender is this extension itself", async () => {
-    const result = handleMessage(controller, { kind: "status" }, SELF);
+    const result = handleMessage(controller, { kind: "status" }, SELF, READY);
     await expect(result).resolves.toEqual({
       state: "locked",
       lastSyncMs: 1000,
@@ -250,7 +259,7 @@ describe("handleMessage request validation", () => {
 
   for (const [label, msg] of MALFORMED) {
     it(`ignores ${label}`, () => {
-      expect(handleMessage(controller, msg, SELF)).toBeUndefined();
+      expect(handleMessage(controller, msg, SELF, READY)).toBeUndefined();
       expectNothingDispatched();
     });
   }
@@ -258,37 +267,37 @@ describe("handleMessage request validation", () => {
   it("does not reject — it returns undefined, so a malformed message yields no error to the sender", () => {
     // Returning a rejected promise would confirm to a probing extension
     // both that this extension exists and which shapes it understands.
-    expect(() => handleMessage(controller, { kind: "unlock" }, SELF)).not.toThrow();
+    expect(() => handleMessage(controller, { kind: "unlock" }, SELF, READY)).not.toThrow();
   });
 });
 
 describe("handleMessage routing", () => {
   it("routes each request kind to the matching controller call", async () => {
-    await handleMessage(controller, { kind: "status" }, SELF);
+    await handleMessage(controller, { kind: "status" }, SELF, READY);
     expect(spies.status).toHaveBeenCalledTimes(1);
 
-    await handleMessage(controller, { kind: "unlock", pin: "135790" }, SELF);
+    await handleMessage(controller, { kind: "unlock", pin: "135790" }, SELF, READY);
     expect(spies.unlock).toHaveBeenCalledWith("135790");
 
-    await handleMessage(controller, { kind: "lock" }, SELF);
+    await handleMessage(controller, { kind: "lock" }, SELF, READY);
     expect(spies.lock).toHaveBeenCalledTimes(1);
 
-    await handleMessage(controller, { kind: "signOut" }, SELF);
+    await handleMessage(controller, { kind: "signOut" }, SELF, READY);
     expect(spies.signOut).toHaveBeenCalledTimes(1);
 
-    await handleMessage(controller, { kind: "list", query: "git" }, SELF);
+    await handleMessage(controller, { kind: "list", query: "git" }, SELF, READY);
     expect(spies.list).toHaveBeenCalledWith("git");
 
-    await handleMessage(controller, { kind: "matches", pageUrl: "https://github.com/" }, SELF);
+    await handleMessage(controller, { kind: "matches", pageUrl: "https://github.com/" }, SELF, READY);
     expect(spies.matchesFor).toHaveBeenCalledWith("https://github.com/");
 
-    await handleMessage(controller, { kind: "fill", tabId: 7, itemId: "c1" }, SELF);
+    await handleMessage(controller, { kind: "fill", tabId: 7, itemId: "c1" }, SELF, READY);
     expect(spies.fill).toHaveBeenCalledWith(7, "c1");
 
-    await handleMessage(controller, { kind: "totp", itemId: "c1" }, SELF);
+    await handleMessage(controller, { kind: "totp", itemId: "c1" }, SELF, READY);
     expect(spies.totpFor).toHaveBeenCalledWith("c1");
 
-    await handleMessage(controller, { kind: "sync" }, SELF);
+    await handleMessage(controller, { kind: "sync" }, SELF, READY);
     expect(spies.syncNow).toHaveBeenCalledTimes(1);
     // syncNow takes no arguments: the retry bookkeeping is internal and is
     // not something a message sender gets to set.
@@ -305,6 +314,7 @@ describe("handleMessage routing", () => {
         twoFactor: { token: "654321", provider: 0 },
       },
       SELF,
+      READY,
     );
     // The envelope is not forwarded — only the named fields.
     expect(spies.setup).toHaveBeenCalledWith({
@@ -318,9 +328,106 @@ describe("handleMessage routing", () => {
 
   it("answers every kind with a promise, so the sender always gets a settled reply", async () => {
     for (const msg of EVERY_KIND) {
-      const result = handleMessage(controller, msg, SELF);
+      const result = handleMessage(controller, msg, SELF, READY);
       expect(result).toBeInstanceOf(Promise);
       await result;
     }
+  });
+});
+
+describe("background page startup", () => {
+  /**
+   * Loads a fresh copy of the background module against a storage stub we
+   * control, and hands back the listener it registered.
+   *
+   * The module reads the stored account asynchronously at import time, so
+   * the only way to observe the window before that read finishes is to
+   * control when `storage.local.get` settles — hence `vi.resetModules()`
+   * and a second import rather than reusing the module-level instance.
+   */
+  async function startBackground(
+    get: () => Promise<Record<string, unknown>>,
+  ): Promise<(msg: unknown, sender: { id?: string }) => unknown> {
+    let listener: ((msg: unknown, sender: { id?: string }) => unknown) | undefined;
+    vi.stubGlobal("browser", {
+      runtime: {
+        id: THIS_EXTENSION_ID,
+        onMessage: {
+          addListener: (fn: (msg: unknown, sender: { id?: string }) => unknown) => {
+            listener = fn;
+          },
+        },
+      },
+      storage: { local: { get, set: async () => {}, remove: async () => {} } },
+    });
+    vi.resetModules();
+    await import("../../src/background/index");
+    if (listener === undefined) throw new Error("the background module registered no listener");
+    return listener;
+  }
+
+  afterEach(() => {
+    vi.stubGlobal("browser", BROWSER_STUB);
+  });
+
+  it("answers status only once the stored account has been loaded", async () => {
+    // Tapping the toolbar icon immediately after Firefox starts lands in
+    // exactly this window. Answering early reports state "empty" for an
+    // account that exists, and the popup shows "Sign in to your vault".
+    let release!: (value: Record<string, unknown>) => void;
+    const stored = new Promise<Record<string, unknown>>((resolve) => {
+      release = resolve;
+    });
+    const listener = await startBackground(() => stored);
+
+    const answer = Promise.resolve(listener({ kind: "status" }, SELF));
+    let settled = false;
+    void answer.then(() => {
+      settled = true;
+    });
+    // A handful of microtask turns: more than enough for a dispatcher that
+    // answered from the unloaded session to have resolved already.
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    expect(settled).toBe(false);
+
+    release({ state: BASE_STATE });
+
+    await expect(answer).resolves.toMatchObject({
+      state: "locked",
+      email: "a@b.com",
+      serverUrl: "https://v.example.net",
+    });
+  });
+
+  it("surfaces a failed load to the sender instead of swallowing it", async () => {
+    // `void controller.init()` dropped the rejection on the floor: the
+    // popup then saw an empty device forever with no indication that
+    // anything had gone wrong.
+    const listener = await startBackground(async () => {
+      throw new Error("QuotaExceededError: storage is unreadable at /data/xyz");
+    });
+
+    const answer = Promise.resolve(listener({ kind: "status" }, SELF));
+    const failure: unknown = await answer.then(
+      () => null,
+      (e: unknown) => e,
+    );
+
+    expect(failure).toBeInstanceOf(Error);
+    const message = failure instanceof Error ? failure.message : "";
+    // User-facing, and carrying nothing from the underlying failure: the
+    // popup renders `.message` verbatim (see popup/errors.ts).
+    expect(message).toMatch(/saved data/i);
+    expect(message).not.toContain("QuotaExceeded");
+    expect(message).not.toContain("/data/xyz");
+  });
+
+  it("still declines a foreign sender without waiting for the load", async () => {
+    // The sender and payload checks stay synchronous. Returning a promise
+    // here — even one that later resolves to nothing — would confirm to the
+    // sender that this extension is installed and listening.
+    const listener = await startBackground(() => new Promise<Record<string, unknown>>(() => {}));
+    expect(listener({ kind: "status" }, FOREIGN)).toBeUndefined();
+    expect(listener({ kind: "nope" }, SELF)).toBeUndefined();
   });
 });

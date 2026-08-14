@@ -5,7 +5,7 @@ import { Session, MAX_PIN_ATTEMPTS } from "../../src/session/session";
 import type { StoredState } from "../../src/session/store";
 import type { SymKey } from "../../src/crypto/encstring";
 import { encryptToString } from "../../src/crypto/encstring";
-import { utf8 } from "../../src/crypto/bytes";
+import { toBase64, utf8 } from "../../src/crypto/bytes";
 import { InvalidResponseError } from "../../src/api/identity";
 
 const PIN = "135790";
@@ -13,6 +13,10 @@ const userKey: SymKey = {
   encKey: new Uint8Array(32).fill(1),
   macKey: new Uint8Array(32).fill(2),
 };
+
+function allZero(b: Uint8Array): boolean {
+  return b.every((byte) => byte === 0);
+}
 
 // Argon2id at the real PIN-wrapping parameters costs several hundred ms, and
 // every test in this file needs the same wrapped key. Wrap once.
@@ -22,12 +26,55 @@ async function pinWrapped(): Promise<Awaited<ReturnType<typeof wrapKeyWithPin>>>
   return { ...pinWrappedOnce };
 }
 
-async function enc(text: string): Promise<string> {
-  return encryptToString(utf8(text), userKey);
+async function enc(text: string, key: SymKey = userKey): Promise<string> {
+  return encryptToString(utf8(text), key);
 }
 
-async function encOrNull(text: string | null): Promise<string | null> {
-  return text === null ? null : enc(text);
+async function encOrNull(text: string | null, key: SymKey = userKey): Promise<string | null> {
+  return text === null ? null : enc(text, key);
+}
+
+/**
+ * The RSA keypair an account's organization keys are wrapped under, plus the
+ * matching `protectedPrivateKey` as it is stored (PKCS#8, wrapped under the
+ * user key). Generating an RSA-2048 key costs real time, so the whole suite
+ * shares one — it stands in for "this account", and every organization
+ * fixture below is encrypted to it.
+ */
+let rsaOnce: { pair: CryptoKeyPair; protectedPrivateKey: string } | null = null;
+async function rsa(): Promise<{ pair: CryptoKeyPair; protectedPrivateKey: string }> {
+  if (rsaOnce === null) {
+    const pair = await crypto.subtle.generateKey(
+      {
+        name: "RSA-OAEP",
+        modulusLength: 2048,
+        publicExponent: new Uint8Array([1, 0, 1]),
+        hash: "SHA-1",
+      },
+      true,
+      ["encrypt", "decrypt"],
+    );
+    const pkcs8 = new Uint8Array(await crypto.subtle.exportKey("pkcs8", pair.privateKey));
+    rsaOnce = { pair, protectedPrivateKey: await encryptToString(pkcs8, userKey) };
+  }
+  return rsaOnce;
+}
+
+/** One organization, as it appears in `profile.organizations` of a sync payload. */
+type OrgFixture = { id: string; name: string; key: string; symKey: SymKey };
+
+async function makeOrg(id: string): Promise<OrgFixture> {
+  const { pair } = await rsa();
+  const raw = crypto.getRandomValues(new Uint8Array(64));
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "RSA-OAEP" }, pair.publicKey, raw));
+  return {
+    id,
+    name: `Org ${id}`,
+    // Type 4: RSA-2048 OAEP-SHA1, ciphertext only — the wire format the
+    // server actually hands back for an organization key.
+    key: `4.${toBase64(ct)}`,
+    symKey: { encKey: raw.slice(0, 32), macKey: raw.slice(32) },
+  };
 }
 
 type Seed = {
@@ -38,32 +85,47 @@ type Seed = {
   totp?: string | null;
   uris?: string[];
   type?: number;
+  /** Encrypts this cipher under that organization's key instead of the user key. */
+  orgId?: string;
 };
 
-async function cacheOf(seeds: Seed[]): Promise<string> {
+async function cacheOf(seeds: Seed[], orgs: OrgFixture[] = []): Promise<string> {
   const ciphers = [];
   for (const s of seeds) {
+    const org = s.orgId === undefined ? undefined : orgs.find((o) => o.id === s.orgId);
+    if (s.orgId !== undefined && org === undefined) {
+      throw new Error(`Seed ${s.id} names organization ${s.orgId}, which was not supplied`);
+    }
+    const key = org?.symKey ?? userKey;
+
     const uris = [];
     for (const u of s.uris ?? []) {
-      uris.push({ uri: await enc(u), match: null });
+      uris.push({ uri: await enc(u, key), match: null });
     }
     ciphers.push({
       id: s.id,
-      organizationId: null,
+      organizationId: org?.id ?? null,
       folderId: null,
       type: s.type ?? 1,
-      name: await enc(s.name),
+      name: await enc(s.name, key),
       favorite: false,
       key: null,
       login: {
-        username: await encOrNull(s.username === undefined ? "octocat" : s.username),
-        password: await encOrNull(s.password === undefined ? "hunter2" : s.password),
-        totp: await encOrNull(s.totp ?? null),
+        username: await encOrNull(s.username === undefined ? "octocat" : s.username, key),
+        password: await encOrNull(s.password === undefined ? "hunter2" : s.password, key),
+        totp: await encOrNull(s.totp ?? null, key),
         uris,
       },
     });
   }
-  return JSON.stringify({ profile: { organizations: null }, folders: [], ciphers });
+  return JSON.stringify({
+    profile: {
+      organizations:
+        orgs.length === 0 ? null : orgs.map((o) => ({ id: o.id, name: o.name, key: o.key })),
+    },
+    folders: [],
+    ciphers,
+  });
 }
 
 const DEFAULT_SEEDS: Seed[] = [
@@ -72,6 +134,8 @@ const DEFAULT_SEEDS: Seed[] = [
 
 type Harness = {
   controller: Controller;
+  /** The controller's own session, for the key-lifetime assertions. */
+  session: Session;
   /** What the fake store currently holds — null once it has been cleared. */
   stored: () => StoredState | null;
 };
@@ -94,19 +158,18 @@ async function makeController(overrides: Partial<StoredState> = {}): Promise<Har
     ...overrides,
   };
 
-  const controller = new Controller(
-    new Session({
-      load: async () => saved,
-      save: async (s) => {
-        saved = s;
-      },
-      clear: async () => {
-        saved = null;
-      },
-    }),
-  );
+  const session = new Session({
+    load: async () => saved,
+    save: async (s) => {
+      saved = s;
+    },
+    clear: async () => {
+      saved = null;
+    },
+  });
+  const controller = new Controller(session);
   await controller.init();
-  return { controller, stored: () => saved };
+  return { controller, session, stored: () => saved };
 }
 
 /** Stubs `browser.tabs` for the fill tests and hands back the spies. */
@@ -511,6 +574,168 @@ describe("Controller", () => {
       await expect(h.controller.syncNow()).rejects.toBeInstanceOf(InvalidResponseError);
       expect(h.stored()?.cipherCache).toBe(before);
       expect((await h.controller.list("")).map((i) => i.id)).toEqual(["c1"]);
+    }, 20000);
+  });
+
+  describe("locking clears the decrypted vault", () => {
+    // These assertions read `controller["items"]` directly. That is the
+    // point of the bug: the decrypted vault — cleartext passwords and TOTP
+    // secrets for every entry — deliberately never crosses a public
+    // boundary (see `summarize`), so there is no public way to observe that
+    // it is still resident. `status()` and `list()` both go by the session
+    // state and stay green whether or not the plaintext was dropped.
+
+    it("drops every decrypted password when the idle timer locks the session", async () => {
+      // Session.lock() zeroes the key buffers and knows nothing about the
+      // Controller, so before this fix the 15-minute idle timeout wiped the
+      // keys and left the whole vault in cleartext in the background page's
+      // heap for as long as Firefox kept it alive.
+      vi.useFakeTimers();
+      try {
+        const { controller, session } = await makeController();
+        await controller.unlock(PIN);
+        expect((await controller.list("")).map((i) => i.name)).toEqual(["GitHub"]);
+
+        // list() above touched the session, so the full timeout starts now.
+        vi.advanceTimersByTime(15 * 60 * 1000 + 1000);
+
+        expect(session.state).toBe("locked");
+        expect(controller["items"]).toEqual([]);
+        expect(JSON.stringify(controller["items"])).not.toContain("hunter2");
+      } finally {
+        vi.useRealTimers();
+      }
+    }, 20000);
+
+    it("drops them on an explicit lock and on signOut", async () => {
+      const first = await makeController();
+      await first.controller.unlock(PIN);
+      first.controller.lock();
+      expect(first.controller["items"]).toEqual([]);
+
+      const second = await makeController();
+      await second.controller.unlock(PIN);
+      await second.controller.signOut();
+      expect(second.controller["items"]).toEqual([]);
+    }, 30000);
+  });
+
+  describe("organization keys", () => {
+    it("rebuilds them from the cache, so org items survive a lock/unlock cycle", async () => {
+      // lock() zeroes and clears orgKeys, and unlockWithPin restores only
+      // the user key. Without a rebuild here every organization cipher
+      // decrypts to the "cannot be decrypted" placeholder until the user
+      // signs in with the master password again.
+      const org = await makeOrg("org-1");
+      const { controller } = await makeController({
+        protectedPrivateKey: (await rsa()).protectedPrivateKey,
+        cipherCache: await cacheOf(
+          [
+            { id: "c1", name: "GitHub", uris: ["https://github.com"] },
+            { id: "o1", name: "Shared VPN", password: "orgpw", orgId: "org-1" },
+          ],
+          [org],
+        ),
+      });
+
+      await controller.unlock(PIN);
+      const afterFirst = (await controller.list("")).find((i) => i.id === "o1");
+      expect(afterFirst).toMatchObject({ name: "Shared VPN", undecryptable: false });
+
+      controller.lock();
+      await controller.unlock(PIN);
+
+      const afterSecond = (await controller.list("")).find((i) => i.id === "o1");
+      expect(afterSecond).toMatchObject({ name: "Shared VPN", undecryptable: false });
+    }, 40000);
+
+    it("picks up an organization the user was added to by a later sync", async () => {
+      // The rebuild has to be unconditional. Skipping it because orgKeys is
+      // already populated would mean a newly-joined organization's items
+      // stay undecryptable until the next full sign-in.
+      const org1 = await makeOrg("org-1");
+      const org2 = await makeOrg("org-2");
+      const { controller } = await makeController({
+        protectedPrivateKey: (await rsa()).protectedPrivateKey,
+        wrappedRefreshToken: await encryptToString(utf8("rt"), userKey),
+        cipherCache: await cacheOf([{ id: "o1", name: "First", orgId: "org-1" }], [org1]),
+      });
+      await controller.unlock(PIN);
+      expect((await controller.list("")).map((i) => i.undecryptable)).toEqual([false]);
+
+      const grown = JSON.parse(
+        await cacheOf(
+          [
+            { id: "o1", name: "First", orgId: "org-1" },
+            { id: "o2", name: "Second", orgId: "org-2" },
+          ],
+          [org1, org2],
+        ),
+      );
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string) => ({
+          ok: true,
+          status: 200,
+          json: async () =>
+            url.includes("/api/sync")
+              ? grown
+              : { access_token: "at", refresh_token: "rt2", expires_in: 3600 },
+          text: async () => "",
+        })),
+      );
+
+      await controller.syncNow();
+
+      const items = await controller.list("");
+      expect(items.map((i) => i.name).sort()).toEqual(["First", "Second"]);
+      expect(items.every((i) => !i.undecryptable)).toBe(true);
+    }, 40000);
+
+    it("zeroes the organization keys it replaces", async () => {
+      // A rebuild that just reassigns the map orphans the previous
+      // Uint8Arrays with live organization key bytes still in them.
+      const org = await makeOrg("org-1");
+      const { controller, session } = await makeController({
+        protectedPrivateKey: (await rsa()).protectedPrivateKey,
+        cipherCache: await cacheOf([{ id: "o1", name: "Shared VPN", orgId: "org-1" }], [org]),
+      });
+
+      await controller.unlock(PIN);
+      const first = session.orgKeys.get("org-1");
+      expect(first).toBeDefined();
+
+      // A second unlock leaves the session unlocked throughout, so this is
+      // the rebuild replacing a live map rather than lock() clearing it.
+      await controller.unlock(PIN);
+
+      expect(session.orgKeys.get("org-1")).not.toBe(first);
+      expect(allZero(first!.encKey)).toBe(true);
+      expect(allZero(first!.macKey)).toBe(true);
+      expect((await controller.list("")).map((i) => i.undecryptable)).toEqual([false]);
+    }, 40000);
+
+    it("leaves org items undecryptable, rather than failing the unlock, when the private key is unusable", async () => {
+      // loadFromCache must never throw: the session is already unlocked by
+      // the time it runs, so a rejection here would leave live keys behind
+      // a rejected unlock().
+      const org = await makeOrg("org-1");
+      const { controller } = await makeController({
+        protectedPrivateKey: await encryptToString(utf8("not a pkcs8 key"), userKey),
+        cipherCache: await cacheOf(
+          [
+            { id: "c1", name: "GitHub", uris: ["https://github.com"] },
+            { id: "o1", name: "Shared VPN", orgId: "org-1" },
+          ],
+          [org],
+        ),
+      });
+
+      await expect(controller.unlock(PIN)).resolves.toBeUndefined();
+      expect(controller.status().state).toBe("unlocked");
+      const items = await controller.list("");
+      expect(items.find((i) => i.id === "c1")!.undecryptable).toBe(false);
+      expect(items.find((i) => i.id === "o1")!.undecryptable).toBe(true);
     }, 20000);
   });
 
