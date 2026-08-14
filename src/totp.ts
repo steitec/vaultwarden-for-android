@@ -18,7 +18,12 @@ function base32Decode(input: string): Bytes {
   const out: number[] = [];
   for (const ch of clean) {
     const idx = B32_ALPHABET.indexOf(ch);
-    if (idx < 0) throw new Error(`Invalid base32 character: ${ch}`);
+    // The offending character is not quoted back. It comes from a vault entry
+    // — for a shared organization item, from whatever an org admin typed —
+    // and this message is rendered in the popup. The alphabet is what the user
+    // needs to be told; the character they got wrong tells them nothing they
+    // cannot see in their own secret.
+    if (idx < 0) throw new Error("TOTP secret is not valid base32 (A-Z and 2-7 only)");
     value = (value << 5) | idx;
     bits += 5;
     if (bits >= 8) {
@@ -34,7 +39,14 @@ function normalizeAlgorithm(a: string | null): TotpConfig["algorithm"] {
     case "SHA1": return "SHA-1";
     case "SHA256": return "SHA-256";
     case "SHA512": return "SHA-512";
-    default: throw new Error(`Unsupported TOTP algorithm: ${a}`);
+    // Same rule as base32Decode above, and this one mattered more: it
+    // interpolated the WHOLE parameter, so an entry could put an arbitrary
+    // string of its own choosing into a popup message. Naming the three
+    // values that are accepted says everything the message needs to.
+    default:
+      throw new Error(
+        "otpauth URI names an unsupported algorithm (expected SHA1, SHA256 or SHA512)",
+      );
   }
 }
 

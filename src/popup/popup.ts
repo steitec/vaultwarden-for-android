@@ -385,9 +385,9 @@ export async function main(): Promise<void> {
    * Which screen #root currently belongs to.
    *
    * Every paint into #root that happens after an `await` has to take a claim
-   * BEFORE that await and check it after. Anything else — a newer keystroke,
-   * or a route() that has moved the user to a different screen entirely —
-   * takes the claim away, and the stale paint is dropped.
+   * BEFORE that await and check it after; a claim that is no longer current
+   * means the screen moved on and the paint is dropped. Two counters, because
+   * the two kinds of paint are not peers.
    *
    * Stamping only the search handler was not enough, because the two things
    * racing are not always two keystrokes. A `list` still in flight when the
@@ -397,16 +397,71 @@ export async function main(): Promise<void> {
    * because renderMessage replaces the whole of #root and takes the PIN form
    * with it, leaving nothing to tap.
    *
-   * The claim is deliberately a value any async path can hold, rather than a
-   * check written into the one handler that had the bug — the next async
+   * But a single shared counter, with routes and keystrokes bumping the same
+   * number, gets the other direction wrong — and that direction is worse. A
+   * route takes its claim BEFORE awaiting the status, and the search box stays
+   * enabled and visible for the whole of that await: it is only disabled once
+   * the locked branch is reached. A keystroke landing in that window would
+   * take the claim from route(), which then paints NOTHING — no header, no PIN
+   * pad, and no `search.disabled = true`. The keystroke's own list, now asking
+   * a locked vault, comes back a LockedError and renderMessage puts it where
+   * the PIN pad should have been. That leaves the user on an error with
+   * nothing to tap, which is a worse place than the stale list this whole
+   * mechanism exists to prevent.
+   *
+   * So: a route change always beats an in-flight list, and a keystroke only
+   * ever beats other lists. `routeEpoch` is bumped by route() alone, and a
+   * list paint has to be BOTH still inside the screen it was issued against
+   * and the newest list within it. Nothing but a route can invalidate a route.
+   *
+   * `displayedEpoch` is the subtle half. A list belongs to the screen the user
+   * was LOOKING AT when it was issued, which is not the same as the route in
+   * progress: the keystroke above arrives after route() has already bumped
+   * `routeEpoch`, so a list that captured that number would still look current
+   * once the PIN pad painted. It captures what is on display instead, and a
+   * route updates that only at the moment it actually paints.
+   *
+   * The claims are deliberately values any async path can hold, rather than
+   * checks written into the one handler that had the bug — the next async
    * render added here needs the same guard and should not have to rediscover
-   * why.
+   * why. Paints belonging to a screen ask claimRoute(); paints that fill in
+   * part of the screen already on display ask claimList().
    */
-  let rootEpoch = 0;
+  /** The newest route, painted or not. */
+  let routeEpoch = 0;
+  /** The route whose screen #root is actually showing. */
+  let displayedEpoch = 0;
+  let listSeq = 0;
 
-  function claimRoot(): () => boolean {
-    const mine = ++rootEpoch;
-    return () => mine === rootEpoch;
+  /**
+   * For a paint that IS a screen change. Only a later route supersedes it.
+   *
+   * The returned predicate has a deliberate side effect: on true it records
+   * this route as the one now on display, which is what makes every list
+   * issued against the previous screen stale. Check and claim are one call
+   * rather than two because a separable "commit" is a step that can be
+   * forgotten, and forgetting it puts the stale-list bug straight back.
+   * Idempotent, so calling it before each of a route's paints is fine.
+   */
+  function claimRoute(): () => boolean {
+    const mine = ++routeEpoch;
+    return () => {
+      if (mine !== routeEpoch) return false;
+      displayedEpoch = mine;
+      return true;
+    };
+  }
+
+  /**
+   * For a paint into the screen that is already up. Superseded by a later
+   * list, and by any route that has painted since — note this reads the
+   * epochs without bumping `routeEpoch`, which is precisely what stops a
+   * keystroke from preempting the route it is racing.
+   */
+  function claimList(): () => boolean {
+    const myScreen = displayedEpoch;
+    const mine = ++listSeq;
+    return () => myScreen === displayedEpoch && mine === listSeq;
   }
 
   function hideSettings(): void {
@@ -421,7 +476,7 @@ export async function main(): Promise<void> {
 
     if (search !== null) {
       search.addEventListener("input", () => {
-        const current = claimRoot();
+        const current = claimList();
         const query = search.value;
         void (async () => {
           try {
@@ -474,7 +529,13 @@ export async function main(): Promise<void> {
     });
   }
 
-  async function showVault(current: () => boolean): Promise<void> {
+  async function showVault(): Promise<void> {
+    // A list claim, not the route's: this is the initial list for a screen
+    // that is already up, and it races the same way a keystroke's list does.
+    // Taken before the first await, and it captures the route it belongs to,
+    // so a later route drops it exactly as the route claim would have.
+    const current = claimList();
+
     if (search !== null) {
       search.disabled = false;
       search.hidden = false;
@@ -520,6 +581,12 @@ export async function main(): Promise<void> {
     }
     // Same claim, same reason as the search handler: this list was asked for
     // on behalf of one screen, and by now the user may be on another.
+    //
+    // Returning here skips wire(), which is safe in both directions and not
+    // by luck. On the very first vault render there is no input listener yet
+    // — wire() is what attaches it — so no keystroke can take this claim, and
+    // only a route can; that route paints its own screen and wires if it
+    // lands back here. On every later render wire() is already a no-op.
     if (!current()) return;
     renderList(items, root);
 
@@ -604,8 +671,9 @@ export async function main(): Promise<void> {
     // stale — including one issued by a screen this route is about to
     // replace, whose answer would otherwise arrive and paint over the new
     // one. Holding the claim rather than only invalidating means route's own
-    // async paths are covered by the same check.
-    const current = claimRoot();
+    // async paths are covered by the same check: only a LATER route can stop
+    // this one from painting.
+    const current = claimRoute();
 
     let status: Status;
     if (known !== undefined) {
@@ -627,7 +695,7 @@ export async function main(): Promise<void> {
     renderStatus(status, statusEl);
 
     if (status.state === "unlocked") {
-      await showVault(current);
+      await showVault();
       return;
     }
 
