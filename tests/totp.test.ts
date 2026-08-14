@@ -76,6 +76,25 @@ describe("parseTotpSecret parameter validation", () => {
     expect(p.period).toBe(30);
   });
 
+  it("does not quote the rejected secret or algorithm back in the message either", () => {
+    // These two predate the digits/period work and are the same hazard. The
+    // realistic route is a shared organization item: its fields are set by an
+    // org admin, it decrypts under an org key rather than the user's own, and
+    // whatever it says lands in a popup message. renderMessage uses
+    // textContent so this is not XSS — it is the class src/popup/errors.ts
+    // already refuses to render for `.cause.message`, and the answer is the
+    // same one: say what is wrong, do not repeat the value.
+    expect(() => parseTotpSecret("AB%CD")).toThrow(/base32/i);
+    expect(() => parseTotpSecret("AB%CD")).not.toThrow(/%/);
+
+    const payload = "<img src=x onerror=alert(1)>";
+    const uri = `otpauth://totp/x?secret=${B32}&algorithm=${encodeURIComponent(payload)}`;
+    expect(() => parseTotpSecret(uri)).toThrow(/algorithm/i);
+    // The whole parameter, not one character of it: this was the worse of the
+    // two.
+    expect(() => parseTotpSecret(uri)).not.toThrow(/onerror|img/i);
+  });
+
   it("does not quote the rejected value back in the message", () => {
     // The URI comes out of the vault, which means it came from the server as
     // ciphertext the popup will render the message for. Naming the parameter
