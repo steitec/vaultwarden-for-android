@@ -903,6 +903,144 @@ describe("stale answers", () => {
     expect(requireEl("root").textContent).not.toContain("Searched");
   });
 
+  it("keeps the newest query's answer when an older one comes back after it", async () => {
+    // The race the stamps were originally for, and it has to keep working
+    // alongside the route check: two keystrokes, and the answer for the
+    // earlier one arrives last. Painting it would show results for a query
+    // the user has already typed past.
+    const first = deferred();
+    const second = deferred();
+    const answers = [first.promise, second.promise];
+    install(
+      defaultResponder({ list: () => answers.shift() ?? [] }),
+      [{ id: 1, url: "https://example.com/login" }],
+    );
+    await main();
+    const search = requireInput("search");
+    search.value = "gi";
+    search.dispatchEvent(new Event("input"));
+    search.value = "git";
+    search.dispatchEvent(new Event("input"));
+    await vi.waitFor(() => expect(sentOf("list")).toHaveLength(2));
+
+    second.settle([item("s2", "Newer")]);
+    await flush();
+    first.settle([item("s1", "Older")]);
+    await flush();
+
+    expect(requireEl("root").textContent).toContain("Newer");
+    expect(requireEl("root").textContent).not.toContain("Older");
+  });
+
+  it("does not let a keystroke suppress the unlock screen a lock is routing to", async () => {
+    // The other direction of the same race, and the one a single shared
+    // counter gets wrong. route() takes its claim BEFORE awaiting the status,
+    // and the search box is still enabled and visible for the whole of that
+    // await — it is only disabled once the locked branch is reached. So a
+    // keystroke lands between the two and, if it can take the claim away from
+    // route(), route paints NOTHING: no header, no PIN pad, and no
+    // `search.disabled = true`. The keystroke's own list then hits a locked
+    // vault and renderMessage puts the LockedError where the PIN pad should
+    // have been. The user is left with an error and no way back in.
+    //
+    // A route change and a keystroke are not peers. A route must always beat
+    // an in-flight list; a keystroke may only beat other lists.
+    const statusAnswers = deferred();
+    const listAnswer = deferred();
+    let statusCalls = 0;
+    let locked = false;
+    install(
+      defaultResponder({
+        status: () => {
+          statusCalls += 1;
+          // The first status opens the vault; the second is the one route()
+          // is awaiting when the keystroke arrives.
+          return statusCalls === 1 ? UNLOCKED : statusAnswers.promise;
+        },
+        list: () => listAnswer.promise,
+        lock: () => {
+          locked = true;
+          return undefined;
+        },
+      }),
+      [{ id: 1, url: "https://example.com/login" }],
+    );
+    await main();
+
+    tap(requireEl("settings"), "#settings-lock");
+    await vi.waitFor(() => expect(sentOf("status")).toHaveLength(2));
+    expect(locked).toBe(true);
+
+    // Mid-route, while the box is still live.
+    const search = requireInput("search");
+    search.value = "git";
+    search.dispatchEvent(new Event("input"));
+    await vi.waitFor(() => expect(sentOf("list")).toHaveLength(1));
+
+    statusAnswers.settle(LOCKED);
+    await flush();
+
+    // Step 4 of the trace: route() must have painted its screen.
+    expect(requireEl("root").querySelector("#unlock-pin")).not.toBeNull();
+    expect(requireEl("status").textContent).toMatch(/locked/i);
+    expect(requireInput("search").disabled).toBe(true);
+
+    // Step 5: and the keystroke's answer — a LockedError, because that is
+    // what a locked vault says to `list` — must not replace it.
+    listAnswer.fail(new Error("Vault is locked"));
+    await flush();
+
+    expect(requireEl("root").querySelector("#unlock-pin")).not.toBeNull();
+    expect(requireEl("root").querySelector(".message-error")).toBeNull();
+  });
+
+  it("still wires the list after a render that lost its claim", async () => {
+    // showVault returns early when its claim is gone, and that return is
+    // before wire(). That is only safe if the render that won the claim
+    // wires instead. Here the first showVault loses to the lock, and the
+    // unlock that follows is what has to leave a working list behind.
+    const stalled = deferred();
+    let locked = false;
+    let unlocked = false;
+    let listCalls = 0;
+    install(
+      defaultResponder({
+        status: () => (unlocked ? UNLOCKED : locked ? LOCKED : UNLOCKED),
+        matches: () => {
+          listCalls += 1;
+          // Only the first vault render is left hanging.
+          return listCalls === 1 ? stalled.promise : [item("m1", "Matched")];
+        },
+        lock: () => {
+          locked = true;
+          return undefined;
+        },
+        unlock: () => {
+          unlocked = true;
+          return undefined;
+        },
+      }),
+      [{ id: 7, url: "https://example.com/login" }],
+    );
+    void main();
+    await vi.waitFor(() => expect(sentOf("matches")).toHaveLength(1));
+
+    tap(requireEl("settings"), "#settings-lock");
+    await vi.waitFor(() => expect(requireEl("root").querySelector("#unlock-pin")).not.toBeNull());
+    stalled.settle([item("stale", "Stale")]);
+    await flush();
+
+    oneInput(requireEl("root"), "#unlock-pin").value = "135790";
+    submitForm(requireEl("root"));
+    await vi.waitFor(() => expect(requireEl("root").textContent).toContain("Matched"));
+
+    // The click handler is the thing wire() attaches. If it never ran, this
+    // tap sends nothing and the panel stays open.
+    requireEl("root").querySelector(".item")?.dispatchEvent(new Event("click", { bubbles: true }));
+    await vi.waitFor(() => expect(closeSpy).toHaveBeenCalled());
+    expect(sentOf("fill")[0]).toEqual({ kind: "fill", tabId: 7, itemId: "m1" });
+  });
+
   it("does not wipe the unlock screen when the late list turns out to be an error", async () => {
     // The error branch is the worse one: renderMessage replaces the whole of
     // #root, so a locked vault's "Vault is locked" answer to a search issued
