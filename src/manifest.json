@@ -1,0 +1,28 @@
+{
+  "manifest_version": 2,
+  "name": "Vaultwarden for Android",
+  "version": "0.1.0",
+  "description": "Unlock and autofill a self-hosted Vaultwarden vault on Firefox for Android.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "vaultwarden-android@steitec.net",
+      "strict_min_version": "121.0",
+      "data_collection_permissions": { "required": ["none"] }
+    },
+    "gecko_android": {
+      "strict_min_version": "121.0"
+    }
+  },
+  "permissions": ["storage", "activeTab"],
+  "optional_permissions": ["https://*/*"],
+  "icons": { "48": "icon-48.png", "96": "icon-96.png" },
+  "browser_action": {
+    "default_title": "Vaultwarden",
+    "default_popup": "popup.html",
+    "default_icon": { "48": "icon-48.png", "96": "icon-96.png" }
+  },
+  "background": {
+    "scripts": ["background.js"],
+    "persistent": true
+  }
+}

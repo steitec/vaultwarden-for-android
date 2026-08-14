@@ -1,0 +1,421 @@
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import {
+  renderSetup,
+  renderUnlock,
+  renderTwoFactor,
+  renderSettings,
+} from "../../src/popup/screens";
+
+// These screens are the only place in the add-on where a master password and
+// a PIN are typed. Everything asserted below is either "the secret does not
+// linger" or "the handler is not reached with something that cannot work" —
+// there is nothing cosmetic here.
+
+/**
+ * Narrows instead of casting. `root.querySelector("#x") as HTMLInputElement`
+ * would silently hand back `null` typed as an input and fail later on
+ * `.value` with a message about undefined; this fails on the line that is
+ * actually wrong.
+ */
+function input(scope: ParentNode, selector: string): HTMLInputElement {
+  const found = scope.querySelector(selector);
+  if (!(found instanceof HTMLInputElement)) throw new Error(`no input matching ${selector}`);
+  return found;
+}
+
+function el(scope: ParentNode, selector: string): HTMLElement {
+  const found = scope.querySelector(selector);
+  if (!(found instanceof HTMLElement)) throw new Error(`no element matching ${selector}`);
+  return found;
+}
+
+function submit(scope: ParentNode): void {
+  const form = scope.querySelector("form");
+  if (!(form instanceof HTMLFormElement)) throw new Error("no form to submit");
+  form.dispatchEvent(new Event("submit", { cancelable: true }));
+}
+
+let root: HTMLElement;
+beforeEach(() => {
+  document.body.replaceChildren();
+  const div = document.createElement("div");
+  div.id = "root";
+  document.body.append(div);
+  root = div;
+});
+
+const GOOD_SETUP = {
+  server: "https://vault.example.net",
+  email: "a@b.com",
+  password: "master",
+  pin: "135790",
+};
+
+function fillSetup(over: Partial<typeof GOOD_SETUP> = {}): void {
+  const v = { ...GOOD_SETUP, ...over };
+  input(root, "#setup-server").value = v.server;
+  input(root, "#setup-email").value = v.email;
+  input(root, "#setup-password").value = v.password;
+  input(root, "#setup-pin").value = v.pin;
+}
+
+describe("renderSetup", () => {
+  it("collects server url, email, master password, and pin", () => {
+    renderSetup(root, async () => {});
+    for (const id of ["setup-server", "setup-email", "setup-password", "setup-pin"]) {
+      expect(root.querySelector(`#${id}`)).not.toBeNull();
+    }
+  });
+
+  it("never shows the master password or the pin as readable text", () => {
+    renderSetup(root, async () => {});
+    expect(input(root, "#setup-password").type).toBe("password");
+    expect(input(root, "#setup-pin").type).toBe("password");
+    expect(input(root, "#setup-pin").getAttribute("inputmode")).toBe("numeric");
+  });
+
+  it("submits the entered values together with the origin to ask permission for", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    renderSetup(root, onSubmit);
+    fillSetup();
+    submit(root);
+    await Promise.resolve();
+
+    expect(onSubmit).toHaveBeenCalledWith({
+      serverUrl: "https://vault.example.net",
+      email: "a@b.com",
+      password: "master",
+      pin: "135790",
+      originPattern: "https://vault.example.net/*",
+    });
+  });
+
+  it("drops the port from the origin pattern, because Firefox rejects one", async () => {
+    // Firefox match patterns have no port component (bug 1362809), so
+    // `https://vault.example.net:8443/*` is not a tighter grant — it is an
+    // invalid pattern that permissions.request() throws on, which would make
+    // a self-hosted server on a non-standard port impossible to sign in to.
+    // The portless host pattern is what Firefox accepts, and it has to be
+    // byte-identical to the one the background page verifies with
+    // permissions.contains().
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    renderSetup(root, onSubmit);
+    fillSetup({ server: "https://vault.example.net:8443/vault/" });
+    submit(root);
+    await Promise.resolve();
+
+    expect(onSubmit.mock.calls[0]?.[0]).toMatchObject({
+      originPattern: "https://vault.example.net/*",
+    });
+  });
+
+  it("trims the server url and the email but never the master password", async () => {
+    // Leading/trailing whitespace is legal in a master password. Trimming it
+    // produces a wrong-password error the user has no way to explain.
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    renderSetup(root, onSubmit);
+    fillSetup({
+      server: "  https://vault.example.net  ",
+      email: "  a@b.com ",
+      password: "  spaced out  ",
+    });
+    submit(root);
+    await Promise.resolve();
+
+    expect(onSubmit.mock.calls[0]?.[0]).toMatchObject({
+      serverUrl: "https://vault.example.net",
+      email: "a@b.com",
+      password: "  spaced out  ",
+    });
+  });
+
+  it("rejects a non-https server url before calling the handler", async () => {
+    const onSubmit = vi.fn();
+    for (const bad of ["http://vault.example.net", "ftp://vault.example.net"]) {
+      renderSetup(root, onSubmit);
+      fillSetup({ server: bad });
+      submit(root);
+      await Promise.resolve();
+      expect(el(root, ".error").textContent).toMatch(/https/i);
+    }
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unparseable server url before calling the handler", async () => {
+    const onSubmit = vi.fn();
+    for (const bad of ["vault.example.net", "not a url", ""]) {
+      renderSetup(root, onSubmit);
+      fillSetup({ server: bad });
+      submit(root);
+      await Promise.resolve();
+      expect(el(root, ".error").textContent).toMatch(/https/i);
+    }
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("rejects a pin shorter than six characters before calling the handler", async () => {
+    const onSubmit = vi.fn();
+    renderSetup(root, onSubmit);
+    fillSetup({ pin: "123" });
+    submit(root);
+    await Promise.resolve();
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(el(root, ".error").textContent).toMatch(/six|6/i);
+  });
+
+  it("clears the master password and pin out of the DOM after a successful submit", async () => {
+    // The panel outlives the submit. A master password sitting in a live
+    // input for the rest of that lifetime is gratuitous.
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    renderSetup(root, onSubmit);
+    const password = input(root, "#setup-password");
+    const pin = input(root, "#setup-pin");
+    fillSetup();
+    submit(root);
+    await vi.waitFor(() => expect(password.value).toBe(""));
+    expect(pin.value).toBe("");
+  });
+
+  it("clears them after a failed submit too", async () => {
+    const onSubmit = vi.fn().mockRejectedValue(new Error("Email or password incorrect"));
+    renderSetup(root, onSubmit);
+    const password = input(root, "#setup-password");
+    const pin = input(root, "#setup-pin");
+    fillSetup();
+    submit(root);
+    await vi.waitFor(() => expect(el(root, ".error").textContent).toMatch(/incorrect/i));
+    expect(password.value).toBe("");
+    expect(pin.value).toBe("");
+  });
+
+  it("shows a rejection's message and never the server-controlled cause", async () => {
+    const failure = new Error("The server returned a response this client could not parse.");
+    failure.cause = new SyntaxError("Unexpected token < in JSON at position 0: <html>pwned</html>");
+    renderSetup(root, vi.fn().mockRejectedValue(failure));
+    fillSetup();
+    submit(root);
+
+    await vi.waitFor(() => expect(el(root, ".error").textContent).toMatch(/could not parse/i));
+    expect(root.textContent).not.toContain("pwned");
+  });
+
+  it("prefills a re-authentication and says that is what it is", () => {
+    // A locked vault with no usable PIN lands here. It is not a new account,
+    // and presenting an empty form reads as one.
+    renderSetup(root, async () => {}, {
+      mode: "reauthenticate",
+      serverUrl: "https://vault.example.net",
+      email: "a@b.com",
+    });
+
+    expect(input(root, "#setup-server").value).toBe("https://vault.example.net");
+    expect(input(root, "#setup-email").value).toBe("a@b.com");
+    expect(root.textContent).toMatch(/again|re-?authenticat/i);
+    // Still editable: the server may have moved.
+    expect(input(root, "#setup-server").readOnly).toBe(false);
+    expect(input(root, "#setup-email").readOnly).toBe(false);
+  });
+
+  it("replaces whatever the container held instead of appending to it", () => {
+    renderSetup(root, async () => {});
+    renderSetup(root, async () => {});
+    expect(root.querySelectorAll("form")).toHaveLength(1);
+  });
+});
+
+describe("renderUnlock", () => {
+  it("shows a numeric pin field", () => {
+    renderUnlock(root, async () => {}, 5);
+    const pin = input(root, "#unlock-pin");
+    expect(pin.type).toBe("password");
+    expect(pin.getAttribute("inputmode")).toBe("numeric");
+  });
+
+  it("presents a locked vault as the normal state, not an error", () => {
+    renderUnlock(root, async () => {}, 5);
+    expect(root.textContent).toMatch(/locked/i);
+    expect(root.querySelector(".message-error")).toBeNull();
+  });
+
+  it("warns as attempts run out", () => {
+    renderUnlock(root, async () => {}, 2);
+    expect(root.textContent).toMatch(/2 attempts/i);
+    expect(root.textContent).toMatch(/master password/i);
+  });
+
+  it("counts the last attempt in the singular", () => {
+    renderUnlock(root, async () => {}, 1);
+    expect(root.textContent).toMatch(/1 attempt remaining/i);
+  });
+
+  it("does not warn when attempts are plentiful", () => {
+    renderUnlock(root, async () => {}, 5);
+    expect(root.textContent).not.toMatch(/attempts/i);
+  });
+
+  it("submits the pin", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    renderUnlock(root, onSubmit, 5);
+    input(root, "#unlock-pin").value = "135790";
+    submit(root);
+    await Promise.resolve();
+    expect(onSubmit).toHaveBeenCalledWith("135790");
+  });
+
+  it("clears the pin out of the DOM afterwards, including after a wrong one", async () => {
+    const onSubmit = vi.fn().mockRejectedValue(new Error("Incorrect PIN"));
+    renderUnlock(root, onSubmit, 4);
+    const pin = input(root, "#unlock-pin");
+    pin.value = "000000";
+    submit(root);
+    await vi.waitFor(() => expect(el(root, ".error").textContent).toMatch(/incorrect pin/i));
+    expect(pin.value).toBe("");
+  });
+
+  it("does not call the handler with an empty pin", async () => {
+    const onSubmit = vi.fn();
+    renderUnlock(root, onSubmit, 5);
+    submit(root);
+    await Promise.resolve();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+});
+
+describe("renderTwoFactor", () => {
+  it("labels the authenticator provider", () => {
+    renderTwoFactor(root, [0], async () => {});
+    expect(root.textContent).toMatch(/authenticator/i);
+  });
+
+  it("labels the email provider", () => {
+    renderTwoFactor(root, [1], async () => {});
+    expect(root.textContent).toMatch(/email/i);
+  });
+
+  it("submits the code with the only offered provider", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    renderTwoFactor(root, [1], onSubmit);
+    input(root, "#tf-code").value = "123456";
+    submit(root);
+    await Promise.resolve();
+    expect(onSubmit).toHaveBeenCalledWith({ token: "123456", provider: 1 });
+  });
+
+  it("lets the user choose when more than one provider is usable", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    renderTwoFactor(root, [0, 1], onSubmit);
+
+    const email = input(root, "#tf-provider-1");
+    expect(email.type).toBe("radio");
+    email.checked = true;
+    input(root, "#tf-code").value = "123456";
+    submit(root);
+    await Promise.resolve();
+
+    expect(onSubmit).toHaveBeenCalledWith({ token: "123456", provider: 1 });
+  });
+
+  it("drops providers this add-on cannot complete", () => {
+    // 7 is WebAuthn: there is no way to complete it from this panel, and
+    // offering it renders a code box that can never be satisfied.
+    renderTwoFactor(root, [7, 0], async () => {});
+    expect(root.querySelector("#tf-provider-7")).toBeNull();
+    expect(root.querySelector("#tf-code")).not.toBeNull();
+  });
+
+  it("says so plainly when no offered provider is usable, instead of a dead form", () => {
+    renderTwoFactor(root, [7], async () => {});
+    expect(root.querySelector("form")).toBeNull();
+    expect(root.querySelector("#tf-code")).toBeNull();
+    expect(root.textContent).toMatch(/cannot|can't|not supported/i);
+  });
+
+  it("does not call the handler with an empty code", async () => {
+    const onSubmit = vi.fn();
+    renderTwoFactor(root, [0], onSubmit);
+    submit(root);
+    await Promise.resolve();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("shows a rejection's message without the cause", async () => {
+    const failure = new Error("That code was not accepted. Try again.");
+    failure.cause = new Error("<html>pwned</html>");
+    renderTwoFactor(root, [0], vi.fn().mockRejectedValue(failure));
+    input(root, "#tf-code").value = "000000";
+    submit(root);
+    await vi.waitFor(() => expect(el(root, ".error").textContent).toMatch(/not accepted/i));
+    expect(root.textContent).not.toContain("pwned");
+  });
+});
+
+describe("renderSettings", () => {
+  function handlers() {
+    return {
+      onSync: vi.fn().mockResolvedValue(undefined),
+      onLock: vi.fn().mockResolvedValue(undefined),
+      onSignOut: vi.fn().mockResolvedValue(undefined),
+    };
+  }
+
+  it("offers sync, lock, and sign out", () => {
+    renderSettings(root, handlers());
+    expect(root.querySelector("#settings-sync")).not.toBeNull();
+    expect(root.querySelector("#settings-lock")).not.toBeNull();
+    expect(root.querySelector("#settings-signout")).not.toBeNull();
+  });
+
+  it("syncs on tap", async () => {
+    const h = handlers();
+    renderSettings(root, h);
+    el(root, "#settings-sync").dispatchEvent(new Event("click", { bubbles: true }));
+    await vi.waitFor(() => expect(h.onSync).toHaveBeenCalled());
+  });
+
+  it("locks on tap", async () => {
+    const h = handlers();
+    renderSettings(root, h);
+    el(root, "#settings-lock").dispatchEvent(new Event("click", { bubbles: true }));
+    await vi.waitFor(() => expect(h.onLock).toHaveBeenCalled());
+  });
+
+  it("does NOT sign out on the first tap", async () => {
+    // One mistap on a phone must not wipe the device copy of the vault.
+    const h = handlers();
+    renderSettings(root, h);
+    el(root, "#settings-signout").dispatchEvent(new Event("click", { bubbles: true }));
+    await Promise.resolve();
+
+    expect(h.onSignOut).not.toHaveBeenCalled();
+    expect(root.textContent).toMatch(/deletes the vault copy on this device/i);
+    expect(root.querySelector("#settings-signout-confirm")).not.toBeNull();
+  });
+
+  it("signs out only after the confirmation is tapped", async () => {
+    const h = handlers();
+    renderSettings(root, h);
+    el(root, "#settings-signout").dispatchEvent(new Event("click", { bubbles: true }));
+    el(root, "#settings-signout-confirm").dispatchEvent(new Event("click", { bubbles: true }));
+    await vi.waitFor(() => expect(h.onSignOut).toHaveBeenCalledTimes(1));
+  });
+
+  it("backs out of the confirmation without signing out", async () => {
+    const h = handlers();
+    renderSettings(root, h);
+    el(root, "#settings-signout").dispatchEvent(new Event("click", { bubbles: true }));
+    el(root, "#settings-signout-cancel").dispatchEvent(new Event("click", { bubbles: true }));
+    await Promise.resolve();
+
+    expect(h.onSignOut).not.toHaveBeenCalled();
+    expect(el(root, "#settings-signout").hidden).toBe(false);
+  });
+
+  it("reports a failed action instead of dropping it silently", async () => {
+    const h = handlers();
+    h.onLock.mockRejectedValue(new Error("The add-on is not responding."));
+    renderSettings(root, h);
+    el(root, "#settings-lock").dispatchEvent(new Event("click", { bubbles: true }));
+    await vi.waitFor(() => expect(el(root, ".error").textContent).toMatch(/not responding/i));
+  });
+});
