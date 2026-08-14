@@ -59,6 +59,25 @@ export function getPublicSuffix(hostname: string): string | null {
     // Check for exception rule first (they override wildcards)
     // Exception rules return the suffix minus the leftmost label
     if (entry.exception.has(suffix)) {
+      // A one-label exception ("!ck") has nothing left once its leftmost
+      // label is removed, so there is no public suffix to report. The guard
+      // is not cosmetic: `-(len - 1)` is `-0` at len 1, and `slice(-0)` is
+      // `slice(0)` — the WHOLE hostname. The single case that has no public
+      // suffix at all would otherwise report the longest one possible.
+      //
+      // Latent today: the list's format ties every exception to a wildcard,
+      // which needs at least two labels, so the vendored data has none. A
+      // refresh is the entire distance between latent and live, and what
+      // this function feeds is uriMatches.
+      //
+      // Answering null rather than "" sends registrableDomain down its
+      // not-in-the-list path, which keeps the last two labels. That is
+      // narrower than the letter of the PSL algorithm — which would treat
+      // the empty suffix as making the rightmost label alone the registrable
+      // domain, and so put every site under that label into one group. When
+      // the choice is between two readings, the one that shares credentials
+      // across fewer hosts is the one to take.
+      if (len === 1) return null;
       return labels.slice(-(len - 1)).join(".");
     }
 

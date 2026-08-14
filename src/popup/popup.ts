@@ -30,8 +30,56 @@ import {
  * settles, so without this race a declined message is indistinguishable from
  * a frozen popup: no list, no error, nothing to tap. The same applies if the
  * background page has crashed or is still starting up.
+ *
+ * The budget is per kind because the kinds are not alike. A flat one has to
+ * be short enough to be a useful "it is not answering" signal for the kinds
+ * answered out of memory, and that same number then cuts off the kinds that
+ * do key derivation before they can possibly have finished. Measured on a
+ * desktop: PBKDF2-SHA256 at 600,000 iterations is 420 ms, wrapKeyWithPin
+ * (Argon2id, 64 MiB, t=4, p=4) is 525 ms, unwrapKeyWithPin is 379 ms. A
+ * mid-range Android phone runs this class of work roughly 3-6x slower.
+ *
+ * Giving up early does not cancel anything: the background page finishes the
+ * work and persists the result whether or not the popup is still listening.
+ * So the cost of a budget that is too short is not a failed operation, it is
+ * telling the user their sign-in or unlock failed when it had just succeeded
+ * — and inviting them to redo the whole key derivation.
+ *
+ * Typed as `Record<Request["kind"], number>` on purpose. A kind added to the
+ * union with no budget decided for it is then a compile error, the same
+ * exhaustiveness trick `handleMessage` uses, rather than a silent inherited
+ * default that nobody revisits.
  */
-const REQUEST_TIMEOUT_MS = 4000;
+const REQUEST_TIMEOUT_MS: Record<Request["kind"], number> = {
+  // Answered from state already in memory: the session's own fields, or the
+  // vault that was decrypted at unlock. If one of these has not come back,
+  // the background page is not there.
+  status: 4000,
+  list: 4000,
+  matches: 4000,
+  totp: 4000,
+  fill: 4000,
+  lock: 4000,
+  signOut: 4000,
+
+  // Argon2id to unwrap the key, then the whole offline cache to decrypt.
+  // ~2.3 s of unwrap alone at the slow end, before the cache.
+  unlock: 15000,
+
+  // A network round trip on mobile data, then a full re-decrypt of the
+  // vault. No key derivation, so the budget covers the network and little
+  // else.
+  sync: 20000,
+
+  // The worst case in the extension, and the one the flat budget broke.
+  // deriveMasterKey + deriveMasterPasswordHash + wrapKeyWithPin land at
+  // 4-9 s on-device, and all of that happens BEFORE the first of three
+  // network round trips (prelogin, token, vault), which are then followed by
+  // decrypting what came back. A generous number here is not laxness: this
+  // is the one operation where a false "not responding" leaves an account
+  // that IS set up behind a screen that says it is not.
+  setup: 45000,
+};
 
 class BackgroundUnavailableError extends Error {
   constructor() {
@@ -65,7 +113,7 @@ function withTimeout<T>(pending: Promise<T>, ms: number): Promise<T> {
 
 function request(req: Request): Promise<unknown> {
   const pending: Promise<unknown> = browser.runtime.sendMessage(req);
-  return withTimeout(pending, REQUEST_TIMEOUT_MS);
+  return withTimeout(pending, REQUEST_TIMEOUT_MS[req.kind]);
 }
 
 /**
@@ -333,10 +381,33 @@ export async function main(): Promise<void> {
   let tabId: number | undefined;
   let wired = false;
 
-  // Renders are stamped so a slow answer for an earlier keystroke cannot
-  // overwrite the list for a later one.
-  let issued = 0;
-  let rendered = 0;
+  /**
+   * Which screen #root currently belongs to.
+   *
+   * Every paint into #root that happens after an `await` has to take a claim
+   * BEFORE that await and check it after. Anything else — a newer keystroke,
+   * or a route() that has moved the user to a different screen entirely —
+   * takes the claim away, and the stale paint is dropped.
+   *
+   * Stamping only the search handler was not enough, because the two things
+   * racing are not always two keystrokes. A `list` still in flight when the
+   * user taps Lock (or when the idle timer locks the vault and route() paints
+   * the PIN pad) used to land on top of the unlock screen: renderList puts
+   * vault entries over a locked vault, and the error branch is worse still,
+   * because renderMessage replaces the whole of #root and takes the PIN form
+   * with it, leaving nothing to tap.
+   *
+   * The claim is deliberately a value any async path can hold, rather than a
+   * check written into the one handler that had the bug — the next async
+   * render added here needs the same guard and should not have to rediscover
+   * why.
+   */
+  let rootEpoch = 0;
+
+  function claimRoot(): () => boolean {
+    const mine = ++rootEpoch;
+    return () => mine === rootEpoch;
+  }
 
   function hideSettings(): void {
     if (settings === null) return;
@@ -350,18 +421,16 @@ export async function main(): Promise<void> {
 
     if (search !== null) {
       search.addEventListener("input", () => {
-        const seq = ++issued;
+        const current = claimRoot();
         const query = search.value;
         void (async () => {
           try {
             const items = await requestItems({ kind: "list", query });
-            if (seq < rendered) return;
-            rendered = seq;
+            if (!current()) return;
             clearBanner(banner);
             renderList(items, root);
           } catch (e) {
-            if (seq < rendered) return;
-            rendered = seq;
+            if (!current()) return;
             renderMessage(errorText(e), root, "error");
           }
         })();
@@ -405,7 +474,7 @@ export async function main(): Promise<void> {
     });
   }
 
-  async function showVault(): Promise<void> {
+  async function showVault(current: () => boolean): Promise<void> {
     if (search !== null) {
       search.disabled = false;
       search.hidden = false;
@@ -439,14 +508,20 @@ export async function main(): Promise<void> {
     const pageUrl = usablePageUrl(tab);
     tabId = tab?.id;
 
+    let items: ItemSummary[];
     try {
-      renderList(await initialItems(pageUrl), root);
+      items = await initialItems(pageUrl);
     } catch (e) {
       // The vault can lock between the status answer and this one — the idle
       // timer does not wait for the popup.
+      if (!current()) return;
       renderMessage(errorText(e), root, "error");
       return;
     }
+    // Same claim, same reason as the search handler: this list was asked for
+    // on behalf of one screen, and by now the user may be on another.
+    if (!current()) return;
+    renderList(items, root);
 
     wire();
     clearBanner(banner);
@@ -524,6 +599,14 @@ export async function main(): Promise<void> {
   }
 
   async function route(known?: Status): Promise<void> {
+    // Taken before anything is awaited. Routing is what changes which screen
+    // #root holds, so it is also what makes every render still in flight
+    // stale — including one issued by a screen this route is about to
+    // replace, whose answer would otherwise arrive and paint over the new
+    // one. Holding the claim rather than only invalidating means route's own
+    // async paths are covered by the same check.
+    const current = claimRoot();
+
     let status: Status;
     if (known !== undefined) {
       status = known;
@@ -531,6 +614,7 @@ export async function main(): Promise<void> {
       try {
         status = await requestStatus();
       } catch (e) {
+        if (!current()) return;
         statusEl.textContent = "Unavailable";
         renderMessage(errorText(e), root, "error");
         if (search !== null) search.disabled = true;
@@ -539,10 +623,11 @@ export async function main(): Promise<void> {
       }
     }
 
+    if (!current()) return;
     renderStatus(status, statusEl);
 
     if (status.state === "unlocked") {
-      await showVault();
+      await showVault(current);
       return;
     }
 
