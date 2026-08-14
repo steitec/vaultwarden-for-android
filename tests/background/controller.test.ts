@@ -5,7 +5,7 @@ import { Session, MAX_PIN_ATTEMPTS } from "../../src/session/session";
 import type { StoredState } from "../../src/session/store";
 import type { SymKey } from "../../src/crypto/encstring";
 import { encryptToString } from "../../src/crypto/encstring";
-import { toBase64, utf8 } from "../../src/crypto/bytes";
+import { fromBase64, toBase64, utf8 } from "../../src/crypto/bytes";
 import { InvalidResponseError } from "../../src/api/identity";
 
 const PIN = "135790";
@@ -172,6 +172,76 @@ async function makeController(overrides: Partial<StoredState> = {}): Promise<Har
   return { controller, session, stored: () => saved };
 }
 
+/**
+ * WebCrypto's `decrypt`, replaced the same way login.test.ts replaces
+ * `importKey`: by defining an own property on the live `crypto.subtle`.
+ *
+ * This is the only seam that reaches INSIDE a decryption that is already in
+ * flight. Nothing else in the load path gives a test a foothold between two
+ * awaits of `decryptVault` — the store is not touched, no message is sent,
+ * and every await is a WebCrypto promise.
+ */
+type DecryptLoose = (
+  algorithm: AlgorithmIdentifier | AesCbcParams | RsaOaepParams,
+  key: CryptoKey,
+  data: BufferSource,
+) => Promise<ArrayBuffer>;
+
+const realDecrypt: DecryptLoose = crypto.subtle.decrypt.bind(
+  crypto.subtle,
+) as unknown as DecryptLoose;
+
+function setDecrypt(fn: DecryptLoose): void {
+  Object.defineProperty(crypto.subtle, "decrypt", {
+    configurable: true,
+    writable: true,
+    value: fn,
+  });
+}
+
+function bytesOf(data: BufferSource): Uint8Array {
+  return ArrayBuffer.isView(data)
+    ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+    : new Uint8Array(data);
+}
+
+/** The ciphertext part of a type-2 EncString (`2.iv|ct|mac`). */
+function ctOf(encString: string): Uint8Array {
+  const ct = encString.split("|")[1];
+  if (ct === undefined) throw new Error(`Not a type-2 EncString: ${encString}`);
+  return fromBase64(ct);
+}
+
+/**
+ * Advances the clock past the idle timeout the first time WebCrypto is asked
+ * to decrypt exactly `trigger`, then lets the real decryption proceed.
+ *
+ * Keying on one specific ciphertext, rather than on a call count, is what
+ * makes this prove what it claims. A count would fire at whatever call
+ * happened to be Nth, and a lock that landed BEFORE the load started would
+ * leave the controller empty for an entirely different reason — the
+ * `userKey === null` early return — and the test would pass without ever
+ * exercising the guard. The ciphertexts chosen below are decrypted at
+ * exactly one point in the whole program, so `fired()` is positive evidence
+ * of where in the load the session locked.
+ *
+ * Requires fake timers: the advance runs synchronously inside the stub, so
+ * the idle timer's callback — the real `Session.lock()`, reached the real
+ * way — completes before the decryption it interrupted resumes.
+ */
+function lockWhileDecrypting(trigger: Uint8Array): { fired: () => boolean } {
+  const want = toBase64(trigger);
+  let fired = false;
+  setDecrypt(async (algorithm, key, data) => {
+    if (!fired && toBase64(bytesOf(data)) === want) {
+      fired = true;
+      vi.advanceTimersByTime(15 * 60 * 1000 + 1000);
+    }
+    return realDecrypt(algorithm, key, data);
+  });
+  return { fired: () => fired };
+}
+
 /** Stubs `browser.tabs` for the fill tests and hands back the spies. */
 function stubTabs(url: string | undefined) {
   const get = vi.fn().mockResolvedValue({ id: 7, url });
@@ -182,7 +252,10 @@ function stubTabs(url: string | undefined) {
 }
 
 beforeEach(() => vi.unstubAllGlobals());
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  setDecrypt(realDecrypt);
+});
 
 describe("Controller", () => {
   it("reports locked before unlocking and exposes no items", async () => {
@@ -618,6 +691,89 @@ describe("Controller", () => {
       await second.controller.signOut();
       expect(second.controller["items"]).toEqual([]);
     }, 30000);
+  });
+
+  describe("a lock that lands in the middle of a load", () => {
+    // decryptVault is a long chain of awaits over the whole vault, and the
+    // idle timer can fire anywhere inside it. By the time the decrypted
+    // array comes back, onLock has already emptied `items` — assigning it
+    // over the top would refill a LOCKED controller with the exact plaintext
+    // the lock just discarded, and leave it there, with the session
+    // reporting "locked" and the vault sitting in the heap. Bug 1 through a
+    // different door.
+
+    it("does not repopulate the vault when the timer fires during decryption", async () => {
+      vi.useFakeTimers();
+      try {
+        const cache = await cacheOf([
+          {
+            id: "c1",
+            name: "GitHub",
+            password: "hunter2",
+            totp: "JBSWY3DPEHPK3PXP",
+            uris: ["https://github.com"],
+          },
+        ]);
+        // The TOTP secret is the LAST field decryptCipher decrypts (uris,
+        // then name, username, password, totp), and its key import has
+        // already happened by the time the ciphertext reaches
+        // crypto.subtle.decrypt. So the interrupted item still decrypts
+        // completely: what reaches the assignment in loadFromCache is a
+        // fully readable entry with the real password in it, not a
+        // placeholder. That is what makes the assertion below meaningful.
+        const parsed: { ciphers: { login: { totp: string } }[] } = JSON.parse(cache);
+        const totpCt = ctOf(parsed.ciphers[0]!.login.totp);
+
+        const { controller, session } = await makeController({ cipherCache: cache });
+        await controller.unlock(PIN);
+        expect((await controller.list("")).map((i) => i.name)).toEqual(["GitHub"]);
+
+        const trigger = lockWhileDecrypting(totpCt);
+        await controller.unlock(PIN);
+
+        // Positive evidence that the lock happened INSIDE decryptVault: this
+        // ciphertext is decrypted nowhere else, and loadFromCache had
+        // already read a non-null userKey to get this far.
+        expect(trigger.fired()).toBe(true);
+        expect(session.state).toBe("locked");
+        expect(controller["items"]).toEqual([]);
+        expect(JSON.stringify(controller["items"])).not.toContain("hunter2");
+      } finally {
+        vi.useRealTimers();
+        setDecrypt(realDecrypt);
+      }
+    }, 40000);
+
+    it("does not install organization keys when the timer fires during the rebuild", async () => {
+      // The sibling case, one await earlier: the rebuild unwraps an RSA key
+      // per organization, and adoptOrgKeys can therefore be reached with the
+      // session already locked. Installing there would leave a locked
+      // session holding live organization keys with nothing left to zero
+      // them until the next lock.
+      vi.useFakeTimers();
+      try {
+        const org = await makeOrg("org-1");
+        const { controller, session } = await makeController({
+          protectedPrivateKey: (await rsa()).protectedPrivateKey,
+          cipherCache: await cacheOf([{ id: "o1", name: "Shared VPN", orgId: "org-1" }], [org]),
+        });
+        await controller.unlock(PIN);
+        expect(session.orgKeys.size).toBe(1);
+
+        // The type-4 RSA ciphertext of the organization key, decrypted only
+        // by unwrapOrgKey and only during the rebuild.
+        const trigger = lockWhileDecrypting(fromBase64(org.key.slice("4.".length)));
+        await controller.unlock(PIN);
+
+        expect(trigger.fired()).toBe(true);
+        expect(session.state).toBe("locked");
+        expect(session.orgKeys.size).toBe(0);
+        expect(controller["items"]).toEqual([]);
+      } finally {
+        vi.useRealTimers();
+        setDecrypt(realDecrypt);
+      }
+    }, 40000);
   });
 
   describe("organization keys", () => {
