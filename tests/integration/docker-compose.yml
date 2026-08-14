@@ -1,0 +1,14 @@
+services:
+  vaultwarden:
+    # Pinned to the reference server's release. Never use :latest here — an
+    # unpinned image turns an upstream change into a mysterious local failure.
+    image: vaultwarden/server:1.37.1
+    environment:
+      I_REALLY_WANT_VOLATILE_STORAGE: "true"
+      SIGNUPS_ALLOWED: "true"
+      ROCKET_PORT: "8080"
+      DISABLE_ICON_DOWNLOAD: "true"
+    ports:
+      # Loopback only, and a throwaway account. Nothing here may ever point at
+      # a real vault: the seeded password is public in this repository.
+      - "127.0.0.1:18080:8080"
