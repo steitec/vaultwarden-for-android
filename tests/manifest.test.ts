@@ -38,6 +38,25 @@ describe("manifest", () => {
     }
   });
 
+  it("declares that it collects no data at all", () => {
+    // Mozilla is making this key mandatory; addons-linter already emits
+    // MISSING_DATA_COLLECTION_PERMISSIONS without it. `none` is the honest
+    // answer here and it has to stay the honest answer: this extension talks
+    // to exactly one server, the one the user typed, and ships no analytics
+    // or telemetry of any kind.
+    //
+    // The literal `"none"` is load-bearing beyond the lint. It is exclusive —
+    // addons-linter rejects it (NONE_DATA_COLLECTION_IS_EXCLUSIVE) if any
+    // other required data-collection permission appears beside it. So the
+    // exact-array assertion below is what would fail first if someone ever
+    // added a collected data category, forcing the AMO listing claim and the
+    // manifest to be reconciled deliberately rather than by accident.
+    const gecko = manifest.browser_specific_settings.gecko as {
+      data_collection_permissions?: { required?: string[] };
+    };
+    expect(gecko.data_collection_permissions?.required).toEqual(["none"]);
+  });
+
   it("declares no content scripts", () => {
     const m = manifest as typeof manifest & { content_scripts?: unknown };
     expect(m.content_scripts).toBeUndefined();
