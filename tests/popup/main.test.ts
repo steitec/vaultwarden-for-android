@@ -671,6 +671,89 @@ describe("failure handling", () => {
     expect(requireEl("root").querySelector(".message-error")).not.toBeNull();
   });
 
+  it("gives up on a status that never answers within a few seconds", async () => {
+    // The counterpart to the two tests below: the crypto kinds get a long
+    // budget, and this pins that the budget was widened per kind and not
+    // globally. A `status` request is answered out of memory, so if one has
+    // not come back in this long the background page is not there.
+    vi.useFakeTimers();
+    sendMessage = vi.fn(() => new Promise(() => {}));
+    vi.stubGlobal("browser", {
+      runtime: { sendMessage },
+      tabs: { query: () => Promise.resolve([]) },
+      permissions: { request: () => Promise.resolve(true) },
+    });
+
+    void main();
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(requireEl("root").textContent).toMatch(/not responding/i);
+  });
+
+  it("waits out a setup that is slow because it is doing Argon2id and PBKDF2", async () => {
+    // Measured on a desktop: PBKDF2-SHA256 at 600k iterations is 420 ms and
+    // wrapKeyWithPin (Argon2id, 64 MiB, t=4, p=4) is 525 ms. setup() does
+    // both plus deriveMasterPasswordHash BEFORE its first network call, and a
+    // mid-range phone is 3-6x slower — so several seconds of silence is the
+    // NORMAL path, not a failure. The background page finishes and persists
+    // the account either way; a popup that gave up here would tell the user
+    // their sign-in failed when it had just succeeded.
+    vi.useFakeTimers();
+    let signedIn = false;
+    install(
+      defaultResponder({
+        status: () => (signedIn ? UNLOCKED : EMPTY),
+        setup: () =>
+          new Promise((resolve) => {
+            setTimeout(() => {
+              signedIn = true;
+              resolve({ ok: true });
+            }, 9_000);
+          }),
+      }),
+      [],
+    );
+    await main();
+    fillSetup();
+    submitForm(requireEl("root"));
+
+    await vi.advanceTimersByTimeAsync(9_000);
+
+    expect(requireEl("root").textContent).not.toMatch(/not responding/i);
+    expect(requireEl("root").textContent).toContain("Listed");
+  });
+
+  it("waits out an unlock that is slow because it is unwrapping the key", async () => {
+    // unwrapKeyWithPin is 379 ms of Argon2id on a desktop and is followed by
+    // decrypting the whole offline cache. Timing it out mid-flight does not
+    // cost a PIN attempt — Session resets the counter on success and the
+    // background completes whether or not the popup is still listening — but
+    // it does tell the user the add-on is broken while it is working.
+    vi.useFakeTimers();
+    let unlocked = false;
+    install(
+      defaultResponder({
+        status: () => (unlocked ? UNLOCKED : LOCKED),
+        unlock: () =>
+          new Promise((resolve) => {
+            setTimeout(() => {
+              unlocked = true;
+              resolve(undefined);
+            }, 8_000);
+          }),
+      }),
+      [],
+    );
+    await main();
+    oneInput(requireEl("root"), "#unlock-pin").value = "135790";
+    submitForm(requireEl("root"));
+
+    await vi.advanceTimersByTimeAsync(8_000);
+
+    expect(requireEl("root").textContent).not.toMatch(/not responding/i);
+    expect(requireEl("root").textContent).toContain("Listed");
+  });
+
   it("reports a malformed answer instead of rendering a blank panel", async () => {
     install(defaultResponder({ status: () => ({ state: "bogus" }) }), []);
     await main();
@@ -759,6 +842,80 @@ describe("search", () => {
     search.value = "x";
     search.dispatchEvent(new Event("input"));
     await vi.waitFor(() => expect(requireEl("root").textContent).toMatch(/vault is locked/i));
+  });
+});
+
+describe("stale answers", () => {
+  // A `list` answer is for the screen that asked for it. Between the ask and
+  // the answer the vault can lock — the user taps Lock, or the idle timer
+  // fires and the next route() paints the PIN pad — and painting the reply
+  // then puts vault entries on top of a locked vault's unlock screen.
+
+  type Deferred = { promise: Promise<unknown>; settle: (value: unknown) => void; fail: (e: unknown) => void };
+
+  function deferred(): Deferred {
+    let settle: (value: unknown) => void = () => {};
+    let fail: (e: unknown) => void = () => {};
+    const promise = new Promise<unknown>((resolve, reject) => {
+      settle = resolve;
+      fail = reject;
+    });
+    return { promise, settle, fail };
+  }
+
+  /** Opens the vault, types a query, and stops with that list in flight. */
+  async function searchThenLock(pending: Promise<unknown>): Promise<void> {
+    let locked = false;
+    install(
+      defaultResponder({
+        status: () => (locked ? LOCKED : UNLOCKED),
+        list: () => pending,
+        lock: () => {
+          locked = true;
+          return undefined;
+        },
+      }),
+      [{ id: 1, url: "https://example.com/login" }],
+    );
+    await main();
+    const search = requireInput("search");
+    search.value = "git";
+    search.dispatchEvent(new Event("input"));
+    await vi.waitFor(() => expect(sentOf("list")).toHaveLength(1));
+
+    tap(requireEl("settings"), "#settings-lock");
+    await vi.waitFor(() => expect(requireEl("root").querySelector("#unlock-pin")).not.toBeNull());
+  }
+
+  /** Lets the settled list answer run all the way to its render, or not. */
+  async function flush(): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  it("does not paint a late list over the unlock screen", async () => {
+    const late = deferred();
+    await searchThenLock(late.promise);
+
+    late.settle([item("s1", "Searched")]);
+    await flush();
+
+    expect(requireEl("root").querySelector("#unlock-pin")).not.toBeNull();
+    expect(requireEl("root").textContent).not.toContain("Searched");
+  });
+
+  it("does not wipe the unlock screen when the late list turns out to be an error", async () => {
+    // The error branch is the worse one: renderMessage replaces the whole of
+    // #root, so a locked vault's "Vault is locked" answer to a search issued
+    // while it was unlocked would leave the user with a message and no PIN
+    // pad — nothing to tap, and no way back in short of reopening the panel.
+    const late = deferred();
+    await searchThenLock(late.promise);
+
+    late.fail(new Error("Vault is locked"));
+    await flush();
+
+    expect(requireEl("root").querySelector("#unlock-pin")).not.toBeNull();
+    expect(requireEl("root").querySelector(".message-error")).toBeNull();
   });
 });
 
