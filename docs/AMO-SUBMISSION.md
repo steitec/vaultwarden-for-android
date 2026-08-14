@@ -30,13 +30,22 @@ icon-48.png   icon-96.png
 
 ### Expected lint output
 
-`web-ext lint` reports **0 errors and 0 warnings**. There is one notice:
+`web-ext lint` reports **0 errors, 0 warnings and 0 notices**. Anything else is
+a regression worth understanding before submitting.
 
-- `MISSING_DATA_COLLECTION_PERMISSIONS` — the
-  `browser_specific_settings.gecko.data_collection_permissions` key is absent.
-  This add-on collects nothing, so the value to add when the key becomes
-  mandatory is the "no data collected" declaration. It is a notice, not a
-  blocker, today.
+The `data_collection_permissions` key is what keeps the notice count at zero.
+The manifest declares:
+
+```json
+"data_collection_permissions": { "required": ["none"] }
+```
+
+`"none"` is exclusive — addons-linter raises `NONE_DATA_COLLECTION_IS_EXCLUSIVE`
+if any other category is listed beside it. So if this add-on ever does start
+collecting something, the manifest cannot quietly gain a category: `none` has to
+be removed first, which is the point at which the AMO listing's data-collection
+answers have to be revisited too. `tests/manifest.test.ts` asserts the exact
+array for the same reason.
 
 ### Before making the listing public
 
@@ -186,4 +195,7 @@ Include this text:
 > **No analytics, no telemetry, no third-party network requests, no remote
 > code.** There are exactly three `fetch` call sites in the source
 > (`src/api/identity.ts` × 2, `src/api/sync.ts` × 1) and all three target the
-> server URL the user entered. No host is hard-coded anywhere.
+> server URL the user entered. No host is hard-coded anywhere. This is declared
+> in the manifest as `data_collection_permissions: { "required": ["none"] }`,
+> and it is checkable from the source: the three call sites above are the whole
+> of the extension's network surface.
