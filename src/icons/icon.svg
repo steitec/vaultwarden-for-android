@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96" role="img" aria-label="Vaultwarden for Android">
+  <title>Vaultwarden for Android</title>
+
+  <!--
+    The master. src/icons/icon-48.png and icon-96.png are rendered from this
+    file; see docs/DEVELOPMENT.md for the command. Edit here, never the PNGs.
+
+    Drawn for a 48px Android toolbar, which is the size that actually
+    constrains it:
+
+      - Nothing thinner than 4 units. At 48px everything here is halved, so a
+        4-unit stroke lands on 2 device pixels and a 3-unit one would grey out
+        into the background.
+      - No text and no detail that depends on being read as a letter. A
+        wordmark is illegible at this size.
+      - The white dial is what carries recognition on a DARK toolbar, where a
+        blue-on-dark square has little to separate it from its surroundings.
+        That is why the dial is large and heavy rather than a thin outline.
+
+    Deliberately NOT a shield. Bitwarden's mark is a shield and Vaultwarden's
+    is too; this is an unofficial third-party client and must not read as an
+    official one. The blue is likewise kept clear of Bitwarden's #175DDC.
+  -->
+
+  <!-- Door body. The 4-unit margin keeps the rounded corners from being
+       clipped by hosts that crop icons to a circle. -->
+  <rect x="4" y="4" width="88" height="88" rx="20" fill="#1D4E89"/>
+
+  <!-- Inset face, one step lighter: reads as a bevelled vault door rather
+       than a flat tile, and survives downscaling because it is a large area
+       rather than an edge highlight. -->
+  <rect x="11" y="11" width="74" height="74" rx="14" fill="#2A6BB0"/>
+
+  <g stroke="#FFFFFF" stroke-linecap="round" fill="none">
+    <!-- Handle spokes, drawn before the ring so the ring sits on top and the
+         joins stay clean.
+
+         They must PROTRUDE past the rim. Spokes that stop at the ring, with
+         the ring and spokes at the same weight, draw a lifebuoy — four even
+         bands on a fat torus — which is exactly what the first attempt at
+         this icon turned out to be. The overhang is the whole difference
+         between a flotation ring and something you grip and turn.
+
+         The spokes live entirely OUTSIDE the rim, so the ring encloses open
+         door face rather than white. Running them inward to the hub is what
+         floods the middle and puts the lifebuoy back — four thick strokes
+         meeting at a point fill the interior almost completely once
+         antialiasing has had its way at 48px.
+
+         Geometry: each spoke runs from radius 16 (just inside the rim, so it
+         tucks under the ring instead of ending in mid-air) to radius 31,
+         along a 45-degree diagonal — offsets are r x cos 45, i.e. 11.31 and
+         21.92 from the centre at 48,48. The rim's outer edge is at 21.75, so
+         9.25 units of each spoke stand clear of it. -->
+    <g stroke-width="6">
+      <line x1="36.69" y1="36.69" x2="26.08" y2="26.08"/>
+      <line x1="59.31" y1="36.69" x2="69.92" y2="26.08"/>
+      <line x1="59.31" y1="59.31" x2="69.92" y2="69.92"/>
+      <line x1="36.69" y1="59.31" x2="26.08" y2="69.92"/>
+    </g>
+
+    <!-- Dial ring, lighter than the spokes so the spokes read as passing
+         over and through it rather than the two merging into one mass. -->
+    <circle cx="48" cy="48" r="19" stroke-width="5.5"/>
+  </g>
+
+  <!-- Centre hub. Small: it only has to give the spokes something to point
+       at, and anything larger closes the interior back up. -->
+  <circle cx="48" cy="48" r="5.5" fill="#FFFFFF"/>
+</svg>
