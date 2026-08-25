@@ -381,6 +381,47 @@ Recorded here so they are not silently lost:
 - a full public suffix list, if subdomain matching proves too coarse in practice
 - a TOTP display in the popup (the background handler already exists)
 
+### Signing and submission: designed, not built
+
+There is no `sign` script yet. Building and submitting to AMO is still a manual
+walk through the dashboard. The shape below was agreed on 2026-08-25 and is
+recorded so it does not have to be re-argued:
+
+```json
+"package": "npm run build && npm run lint:ext && git archive --format=zip -o source.zip HEAD",
+"sign":    "npm test && npm run package && web-ext sign -s dist --channel=listed --upload-source-code=source.zip"
+```
+
+**Two scripts, not one, and that is the whole point.** `web-ext sign
+--channel=listed` uploads the build and submits that version for review. It is
+outward-facing and cannot be taken back — a submitted version can later be
+disabled, but the version number is spent at AMO either way. A single command
+that does this as a side effect of "make me a build" is a trap. So `package` is
+the harmless half (builds, lints, writes `source.zip`, touches no network) and
+`sign` is the one command that actually sends something.
+
+`--upload-source-code` means the source archive rides along with the
+submission instead of being uploaded separately in the dashboard, which is what
+the "Source code submission" section of `docs/AMO-SUBMISSION.md` currently
+describes doing by hand.
+
+Credentials come from the `WEB_EXT_API_KEY` and `WEB_EXT_API_SECRET`
+environment variables (AMO: *Tools → Manage API Keys*), never as `--api-key`
+flags in `package.json` — flags land in shell history and in the process list
+of every user on the machine. They belong nowhere in this repository.
+
+`npm test` runs first. Twenty-five seconds against a version that cannot be
+recalled is cheap insurance, not ceremony.
+
+Two things to do when building it: add `source.zip` to `.gitignore`, where
+`docs/AMO-SUBMISSION.md` currently only warns against committing it in prose;
+and note that AMO rejects a version number it has already seen, so `version` in
+**both** `package.json` and `src/manifest.json` has to be raised before each
+submission.
+
+Only `package` is meaningfully testable — it is deterministic and offline.
+Testing `sign` against AMO would mean making a real submission.
+
 ## Known gaps in what already ships
 
 Not features that were postponed — these are true of the current build. Each
