@@ -679,3 +679,26 @@ describe("refreshBadge", () => {
     expect(() => tapBadge()).not.toThrow();
   });
 });
+
+describe("the module-scope lookup", () => {
+  it("looks for a login form as soon as the module is evaluated", async () => {
+    // The declared content script's only entry point is the call at module
+    // scope. It runs while the rest of the module body is still being
+    // evaluated, so anything it touches that is declared with let/const
+    // BELOW it sits in the temporal dead zone -- and the resulting
+    // ReferenceError is swallowed by the `void`, leaving no badge, no error
+    // and no clue.
+    //
+    // Every other test in this file calls refreshBadge() by hand, long after
+    // evaluation has finished and the dead zone is over. That is why this is
+    // the one path they cannot cover, and it is the path that shipped broken.
+    vi.resetModules();
+    document.body.innerHTML = `<input type="password">`;
+    sendMessage.mockReset();
+    sendMessage.mockResolvedValue({ state: "unlocked", items: [] });
+
+    await import("../../src/content/autofill");
+
+    await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledWith({ kind: "matches" }));
+  });
+});
