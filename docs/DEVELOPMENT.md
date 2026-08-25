@@ -72,8 +72,14 @@ that is only visible once it is rasterised at real size.
 
 ## Running on a phone
 
-Release Firefox for Android cannot sideload an extension, so on-device
-development uses Firefox Nightly.
+On-device development uses Firefox Nightly, because `web-ext run` installs an
+unsigned build over adb and Nightly is the only channel that accepts one.
+
+That is narrower than "release Firefox cannot take an extension". Release will
+install a **signed** XPI chosen from local storage, and that is how the add-on is
+meant to reach your own phone for real use — `docs/PRIVATE-INSTALL.md` covers it.
+It is useless as a development loop, though: every change would have to go
+through AMO's signing service first. Hence Nightly for everything below.
 
 1. Install Firefox Nightly on the phone from Google Play.
 2. In Nightly: Settings → About Firefox → tap the logo five times to enable the
@@ -128,10 +134,10 @@ extension's console means `about:debugging` on desktop Firefox.
 installed makes `web-ext` stop and ask which to use. The mapping is not
 guessable, so:
 
-| Package | Channel | Sideloading |
+| Package | Channel | Takes `web-ext run` |
 | --- | --- | --- |
 | `org.mozilla.fenix` | Nightly (version ends `a1`) | yes |
-| `org.mozilla.firefox` | Release | **no** |
+| `org.mozilla.firefox` | Release | **no** — signed XPI from a file only |
 
 "Fenix" was the codename for the rewritten Firefox for Android; Nightly kept it
 as its package id while release took `org.mozilla.firefox`. So the id that looks
