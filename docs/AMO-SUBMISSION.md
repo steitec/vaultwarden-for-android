@@ -61,14 +61,26 @@ software this client talks to.
 
 ## Listing settings
 
-Submit at https://addons.mozilla.org/developers/ as a **listed** add-on, then set
-visibility to **invisible** so it is installable by direct URL but not
-searchable.
+Submit at https://addons.mozilla.org/developers/ as a **listed** add-on, and
+leave it visible. That is what this document is for, and it is a public act: a
+listing page, a search entry, human review, and a version number that cannot be
+taken back.
 
-This is not a stylistic choice. An **unlisted** add-on cannot be installed on
-release Firefox for Android at all — which is the entire reason this project
-exists. Invisible-listed is the only configuration that produces an installable
-add-on without publishing it to the world.
+**If the goal is to run the add-on privately on your own phone, this is the
+wrong document.** Sign it *unlisted* and install the signed XPI from a file —
+`docs/PRIVATE-INSTALL.md` walks that route end to end. Nothing done there has to
+be undone before submitting a listed version later; the add-on id is the same
+either way.
+
+There is no third option in between. AMO has no "we host it, but hidden" mode:
+setting a listed add-on to **invisible** takes the download away along with the
+listing page, so it leaves nothing installable behind.
+
+An earlier revision of this file recommended invisible-listed as the private
+route and claimed an unlisted add-on cannot be installed on release Firefox for
+Android at all. Both halves were wrong, and in opposite directions — invisible
+is *not* installable, and unlisted *is*, from a local file, on release Firefox
+122 and newer.
 
 Confirm the finished listing shows Android compatibility. If it does not, the
 `browser_specific_settings.gecko_android` key in `src/manifest.json` is missing
