@@ -389,9 +389,8 @@ describe("Controller", () => {
   it("refuses to fill on a plain http origin", async () => {
     const { controller } = await makeController();
     await controller.unlock(PIN);
-    const { executeScript, sendMessage } = stubTabs("http://example.com/login");
+    const { sendMessage } = stubTabs("http://example.com/login");
     await expect(controller.fill(1, "c1")).rejects.toThrow(/https/i);
-    expect(executeScript).not.toHaveBeenCalled();
     expect(sendMessage).not.toHaveBeenCalled();
   }, 20000);
 
@@ -403,18 +402,18 @@ describe("Controller", () => {
     await controller.unlock(PIN);
 
     for (const url of ["about:blank", "moz-extension://abcd/popup.html", "::::", ""]) {
-      const { executeScript } = stubTabs(url);
+      const { sendMessage } = stubTabs(url);
       await expect(controller.fill(1, "c1")).rejects.toThrow(/https/i);
-      expect(executeScript).not.toHaveBeenCalled();
+      expect(sendMessage).not.toHaveBeenCalled();
     }
   }, 20000);
 
   it("refuses to fill when the tab has no readable url", async () => {
     const { controller } = await makeController();
     await controller.unlock(PIN);
-    const { executeScript } = stubTabs(undefined);
+    const { sendMessage } = stubTabs(undefined);
     await expect(controller.fill(1, "c1")).rejects.toThrow(/page URL/i);
-    expect(executeScript).not.toHaveBeenCalled();
+    expect(sendMessage).not.toHaveBeenCalled();
   }, 20000);
 
   it("treats http loopback as a fillable origin", async () => {
@@ -430,7 +429,7 @@ describe("Controller", () => {
     const { executeScript, sendMessage } = stubTabs("http://localhost:8080/login");
 
     await controller.fill(1, "local");
-    expect(executeScript).toHaveBeenCalledWith(1, { file: "autofill.js" });
+    expect(executeScript).not.toHaveBeenCalled();
     expect(sendMessage).toHaveBeenCalledWith(1, {
       kind: "fill",
       username: "octocat",
@@ -447,13 +446,28 @@ describe("Controller", () => {
     await expect(controller.fill(1, "c1")).rejects.toThrow(/does not match/i);
   }, 20000);
 
+  it("does not inject the content script, which the manifest already declares", async () => {
+    // The manifest declares autofill.js on every fillable origin, so it is
+    // already running in the tab. Injecting it again would load a second copy
+    // into the same isolated world, register a second onMessage listener, and
+    // fill twice per tap.
+    const { controller } = await makeController();
+    await controller.unlock(PIN);
+    const { executeScript, sendMessage } = stubTabs("https://github.com/login");
+
+    await controller.fill(7, "c1");
+
+    expect(executeScript).not.toHaveBeenCalled();
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+  }, 20000);
+
   it("does not treat an attacker hostname ending in a loopback name as loopback", async () => {
     const { controller } = await makeController();
     await controller.unlock(PIN);
     for (const url of ["http://evil.localhost/login", "http://127.0.0.1.evil.test/login"]) {
-      const { executeScript } = stubTabs(url);
+      const { sendMessage } = stubTabs(url);
       await expect(controller.fill(1, "c1")).rejects.toThrow(/https/i);
-      expect(executeScript).not.toHaveBeenCalled();
+      expect(sendMessage).not.toHaveBeenCalled();
     }
   }, 20000);
 
@@ -462,28 +476,25 @@ describe("Controller", () => {
     // hand a github password to an unrelated site.
     const { controller } = await makeController();
     await controller.unlock(PIN);
-    const { executeScript, sendMessage } = stubTabs("https://evil.example/login");
+    const { sendMessage } = stubTabs("https://evil.example/login");
 
     await expect(controller.fill(7, "c1")).rejects.toThrow(/does not match/i);
-    expect(executeScript).not.toHaveBeenCalled();
     expect(sendMessage).not.toHaveBeenCalled();
   }, 20000);
 
-  it("refuses to fill an entry that has no password, without injecting anything", async () => {
+  it("refuses to fill an entry that has no password, without sending anything", async () => {
     // `undecryptable === false` does not imply fillable. A login cipher with
-    // URIs and a null password is returned by matchItems, and injecting for
-    // it would grant the page the activeTab content script and then report
-    // success for a fill that left the password box empty.
+    // URIs and a null password is returned by matchItems, and sending for it
+    // would report success for a fill that left the password box empty.
     const { controller } = await makeController({
       cipherCache: await cacheOf([
         { id: "nopw", name: "No password", password: null, uris: ["https://github.com"] },
       ]),
     });
     await controller.unlock(PIN);
-    const { executeScript, sendMessage } = stubTabs("https://github.com/login");
+    const { sendMessage } = stubTabs("https://github.com/login");
 
     await expect(controller.fill(7, "nopw")).rejects.toThrow(/no password/i);
-    expect(executeScript).not.toHaveBeenCalled();
     expect(sendMessage).not.toHaveBeenCalled();
   }, 20000);
 
@@ -524,7 +535,7 @@ describe("Controller", () => {
     await controller.fill(7, "c1");
 
     expect(get).toHaveBeenCalledWith(7);
-    expect(executeScript).toHaveBeenCalledWith(7, { file: "autofill.js" });
+    expect(executeScript).not.toHaveBeenCalled();
     expect(sendMessage).toHaveBeenCalledWith(7, {
       kind: "fill",
       username: "octocat",

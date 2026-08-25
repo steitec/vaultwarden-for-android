@@ -490,9 +490,10 @@ export class Controller {
       throw new Error("This entry has no password to fill.");
     }
 
-    // activeTab grants access to this tab only, and only because the user just
-    // acted. The script is injected now, not at page load.
-    await browser.tabs.executeScript(tabId, { file: "autofill.js" });
+    // The content script is declared in the manifest and is already present on
+    // every fillable origin, so there is nothing to inject. Injecting anyway
+    // would load a second copy into the same isolated world and register a
+    // second onMessage listener, filling twice per tap.
     await browser.tabs.sendMessage(tabId, {
       kind: "fill",
       username: item.username,
