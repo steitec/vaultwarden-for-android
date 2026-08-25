@@ -1,3 +1,6 @@
+import { mountBadge, type BadgeMode } from "./badge";
+import type { PageMatches } from "../background/messages";
+
 const USERNAME_SELECTOR = [
   'input[type="text"]',
   'input[type="email"]',
@@ -235,3 +238,74 @@ browser.runtime.onMessage.addListener((msg: unknown, sender: browser.runtime.Mes
   if (!isFillMessage(msg)) return undefined;
   return Promise.resolve(fillFields(document, { username: msg.username, password: msg.password }));
 });
+
+// Declared in the manifest at document_idle, so this runs on every fillable
+// origin the moment the page settles. It is fire-and-forget on purpose: a
+// content script has nobody to report to, and refreshBadge swallows its own
+// failures rather than surfacing them onto someone else's page.
+void refreshBadge(document);
+
+let unmountBadge: (() => void) | null = null;
+
+/**
+ * Decide what this page can offer, and offer it.
+ *
+ * The order matters. The password field is looked for BEFORE the background
+ * page is asked anything, so a page with no login form never produces a
+ * message at all: the background page learns nothing about the ordinary
+ * browsing of someone who is not signing in to something.
+ */
+export async function refreshBadge(doc: Document): Promise<void> {
+  unmountBadge?.();
+  unmountBadge = null;
+
+  const { password } = findLoginFields(doc);
+  if (password === null) return;
+
+  let matches: PageMatches;
+  try {
+    matches = await browser.runtime.sendMessage({ kind: "matches" });
+  } catch {
+    // The background page is locked out, restarting, or gone. Leave the page
+    // untouched: a content script must not surface this addon's errors onto
+    // somebody else's site.
+    return;
+  }
+
+  const mode = modeFor(matches);
+  if (mode === null) return;
+
+  // The item id is carried only for the single-match case. Everything else
+  // hands off to the popup, which is where a choice can actually be made.
+  const only = matches.state === "unlocked" && matches.items.length === 1 ? matches.items[0] : undefined;
+  const itemId = only?.id ?? null;
+
+  unmountBadge = mountBadge(password, mode, () => {
+    void onTap(mode, itemId);
+  });
+}
+
+/**
+ * A locked vault gets a badge whether or not anything matches, because it
+ * cannot be asked — see the 2026-08-25 design's §7. The cost is a badge on
+ * login pages with no entry; the alternative is an unencrypted index of every
+ * domain in the vault, which is worse.
+ */
+function modeFor(matches: PageMatches): BadgeMode | null {
+  if (matches.state === "locked") return "unlock";
+  if (matches.items.length === 0) return null;
+  return matches.items.length === 1 ? "fill" : "chooser";
+}
+
+async function onTap(mode: BadgeMode, itemId: string | null): Promise<void> {
+  try {
+    if (mode === "fill" && itemId !== null) {
+      await browser.runtime.sendMessage({ kind: "fillFromPage", itemId });
+      return;
+    }
+    await browser.runtime.sendMessage({ kind: "handOff" });
+  } catch {
+    // A refused fill, or a handOff whose handler does not exist yet. Nothing
+    // to do on the page: the background page owns the user-facing report.
+  }
+}
