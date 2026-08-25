@@ -552,9 +552,13 @@ export class Controller {
 
     // `undecryptable === false` does not imply fillable: a login cipher can
     // legitimately have URIs and no password at all, and matchItems returns
-    // it. Injecting for one of those would grant the page the activeTab
-    // content script and then report success for a fill that left the
-    // password box empty. Refuse before anything is injected or sent.
+    // it. Sending for one of those would report success for a fill that left
+    // the password box empty. Refuse before anything is sent.
+    //
+    // It matters more now than it did when the content script was injected on
+    // demand: an entry with no password still counts as a match, so it would
+    // put a badge on the page and then do nothing when tapped.
+    //
     // A null *username* is fine — username-less entries are normal, and the
     // content script skips that field.
     if (item.password === null) {
