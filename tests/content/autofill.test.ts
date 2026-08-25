@@ -17,9 +17,14 @@ let registeredListener:
   | ((msg: unknown, sender: { id?: string }) => unknown)
   | undefined;
 
+// refreshBadge talks to the background page through runtime.sendMessage.
+// Each test sets what that answers.
+const sendMessage = vi.fn();
+
 vi.stubGlobal("browser", {
   runtime: {
     id: THIS_EXTENSION_ID,
+    sendMessage,
     onMessage: {
       addListener: (fn: (msg: unknown, sender: { id?: string }) => unknown) => {
         registeredListener = fn;
@@ -28,7 +33,10 @@ vi.stubGlobal("browser", {
   },
 });
 
-const { findLoginFields, fillFields } = await import("../../src/content/autofill");
+const { findLoginFields, fillFields, refreshBadge } = await import(
+  "../../src/content/autofill"
+);
+const { BADGE_HOST_ATTR } = await import("../../src/content/badge");
 
 function setBody(html: string) {
   document.body.innerHTML = html;
@@ -502,5 +510,172 @@ describe("onMessage listener (sender verification)", () => {
     );
     expect(result).toEqual({ filledUsername: true, filledPassword: true });
     expect(document.querySelector<HTMLInputElement>('[name="u"]')!.value).toBe("octocat");
+  });
+});
+
+describe("refreshBadge", () => {
+  function badge(): HTMLElement | null {
+    const el = document.querySelector(`[${BADGE_HOST_ATTR}]`);
+    return el instanceof HTMLElement ? el : null;
+  }
+
+  function tapBadge(): void {
+    badge()?.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
+  }
+
+  beforeEach(() => {
+    sendMessage.mockReset();
+    setBody("");
+  });
+
+  it("renders nothing on a page with no password field", async () => {
+    setBody(`<input type="text" name="q">`);
+    sendMessage.mockResolvedValue({ state: "unlocked", items: [] });
+
+    await refreshBadge(document);
+
+    expect(badge()).toBeNull();
+    // Not merely "no badge": a page with no login form must not cause the
+    // background page to be asked about it at all. Otherwise every page the
+    // user opens becomes a message.
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("renders nothing when the vault is unlocked and nothing matches", async () => {
+    setBody(`<input type="password">`);
+    sendMessage.mockResolvedValue({ state: "unlocked", items: [] });
+
+    await refreshBadge(document);
+
+    expect(badge()).toBeNull();
+  });
+
+  it("renders a fill badge for exactly one match", async () => {
+    setBody(`<input type="password">`);
+    sendMessage.mockResolvedValue({ state: "unlocked", items: [{ id: "a", name: "Router" }] });
+
+    await refreshBadge(document);
+
+    expect(badge()?.getAttribute(BADGE_HOST_ATTR)).toBe("fill");
+  });
+
+  it("renders a chooser badge for several matches", async () => {
+    setBody(`<input type="password">`);
+    sendMessage.mockResolvedValue({
+      state: "unlocked",
+      items: [
+        { id: "a", name: "One" },
+        { id: "b", name: "Two" },
+      ],
+    });
+
+    await refreshBadge(document);
+
+    expect(badge()?.getAttribute(BADGE_HOST_ATTR)).toBe("chooser");
+  });
+
+  it("renders an unlock badge when locked, without knowing whether anything matches", async () => {
+    setBody(`<input type="password">`);
+    sendMessage.mockResolvedValue({ state: "locked" });
+
+    await refreshBadge(document);
+
+    expect(badge()?.getAttribute(BADGE_HOST_ATTR)).toBe("unlock");
+  });
+
+  it("asks the background page to fill when a single-match badge is tapped", async () => {
+    setBody(`<input type="password">`);
+    sendMessage.mockResolvedValue({ state: "unlocked", items: [{ id: "a", name: "Router" }] });
+    await refreshBadge(document);
+    sendMessage.mockClear();
+
+    tapBadge();
+
+    expect(sendMessage).toHaveBeenCalledWith({ kind: "fillFromPage", itemId: "a" });
+  });
+
+  it("hands off to the popup when several entries match", async () => {
+    // Nothing on the page can choose between two entries for one domain.
+    setBody(`<input type="password">`);
+    sendMessage.mockResolvedValue({
+      state: "unlocked",
+      items: [
+        { id: "a", name: "One" },
+        { id: "b", name: "Two" },
+      ],
+    });
+    await refreshBadge(document);
+    sendMessage.mockClear();
+
+    tapBadge();
+
+    expect(sendMessage).toHaveBeenCalledWith({ kind: "handOff" });
+  });
+
+  it("hands off to the popup when the vault is locked", async () => {
+    setBody(`<input type="password">`);
+    sendMessage.mockResolvedValue({ state: "locked" });
+    await refreshBadge(document);
+    sendMessage.mockClear();
+
+    tapBadge();
+
+    expect(sendMessage).toHaveBeenCalledWith({ kind: "handOff" });
+  });
+
+  it("never sends a credential-bearing message from the page", async () => {
+    // The content script's whole security story is that it holds nothing.
+    // What it may send is an item id and a request to hand off, never a
+    // password, and never an id it was not given by the background page.
+    setBody(`<input type="password">`);
+    sendMessage.mockResolvedValue({ state: "unlocked", items: [{ id: "a", name: "Router" }] });
+    await refreshBadge(document);
+    tapBadge();
+
+    for (const [msg] of sendMessage.mock.calls) {
+      expect(JSON.stringify(msg)).not.toMatch(/password/i);
+    }
+  });
+
+  it("replaces a previous badge rather than stacking a second one", async () => {
+    setBody(`<input type="password">`);
+    sendMessage.mockResolvedValue({ state: "unlocked", items: [{ id: "a", name: "Router" }] });
+
+    await refreshBadge(document);
+    await refreshBadge(document);
+
+    expect(document.querySelectorAll(`[${BADGE_HOST_ATTR}]`)).toHaveLength(1);
+  });
+
+  it("removes the badge when the page stops offering a password field", async () => {
+    setBody(`<input type="password">`);
+    sendMessage.mockResolvedValue({ state: "unlocked", items: [{ id: "a", name: "Router" }] });
+    await refreshBadge(document);
+    expect(badge()).not.toBeNull();
+
+    setBody(`<p>signed in</p>`);
+    await refreshBadge(document);
+
+    expect(badge()).toBeNull();
+  });
+
+  it("renders nothing when the background page rejects", async () => {
+    // A locked-out or mid-restart background page must leave the page alone
+    // rather than throwing out of a content script on somebody's site.
+    setBody(`<input type="password">`);
+    sendMessage.mockRejectedValue(new Error("Vault is locked"));
+
+    await expect(refreshBadge(document)).resolves.toBeUndefined();
+
+    expect(badge()).toBeNull();
+  });
+
+  it("does not throw out of the page when a fill is refused", async () => {
+    setBody(`<input type="password">`);
+    sendMessage.mockResolvedValue({ state: "unlocked", items: [{ id: "a", name: "Router" }] });
+    await refreshBadge(document);
+    sendMessage.mockRejectedValue(new Error("Refusing to fill on an insecure page."));
+
+    expect(() => tapBadge()).not.toThrow();
   });
 });
