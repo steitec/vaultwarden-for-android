@@ -32,6 +32,8 @@ const BROWSER_STUB = {
   // the caller, and fall back to the active tab when the sender has none
   // (the popup). Overridden per test where the answer matters.
   tabs: { query: async (): Promise<Array<{ id?: number; url?: string }>> => [] },
+  // handOff opens the popup when the platform allows it. Replaced per test.
+  browserAction: undefined as { openPopup: () => Promise<void> } | undefined,
 };
 vi.stubGlobal("browser", BROWSER_STUB);
 
@@ -540,5 +542,108 @@ describe("fillFromPage", () => {
     await expect(
       handleMessage(controller, { kind: "fillFromPage", itemId: "c1" }, CONTENT_SCRIPT, READY),
     ).rejects.toThrow(/insecure/i);
+  });
+});
+
+describe("handOff", () => {
+  const CONTENT_SCRIPT: browser.runtime.MessageSender = {
+    id: THIS_EXTENSION_ID,
+    tab: { id: 7, url: "https://fritz.box/login" } as browser.tabs.Tab,
+  };
+
+  const LOCKED_STATUS = {
+    state: "locked",
+    lastSyncMs: 1000,
+    email: "a@b.com",
+    serverUrl: "https://v.example.net",
+    pinUnlockAvailable: true,
+    pinAttemptsRemaining: 5,
+  } as const;
+  const UNLOCKED_STATUS = { ...LOCKED_STATUS, state: "unlocked" } as const;
+
+  let openPopup: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    openPopup = vi.fn().mockResolvedValue(undefined);
+    BROWSER_STUB.browserAction = { openPopup };
+  });
+
+  it("records a pending fill when the vault is locked", async () => {
+    spies.status.mockReturnValue({ ...LOCKED_STATUS });
+    const record = vi.spyOn(controller, "recordPending");
+
+    await handleMessage(controller, { kind: "handOff" }, CONTENT_SCRIPT, READY);
+
+    expect(record).toHaveBeenCalledWith(
+      expect.objectContaining({ tabId: 7, origin: "https://fritz.box" }),
+    );
+  });
+
+  it("records the origin, not the whole URL", async () => {
+    // The redemption compares origins. Recording a full URL would either
+    // never match after a path change or, worse, be compared loosely.
+    spies.status.mockReturnValue({ ...LOCKED_STATUS });
+    const record = vi.spyOn(controller, "recordPending");
+
+    await handleMessage(controller, { kind: "handOff" }, CONTENT_SCRIPT, READY);
+
+    const arg = record.mock.calls[0]?.[0];
+    expect(arg?.origin).toBe("https://fritz.box");
+  });
+
+  it("records nothing when the vault is already unlocked", async () => {
+    // An unlocked multi-match tap needs the popup, not a redeemable intent.
+    // Leaving one behind would fire on some later, unrelated unlock.
+    spies.status.mockReturnValue({ ...UNLOCKED_STATUS });
+    const record = vi.spyOn(controller, "recordPending");
+
+    await handleMessage(controller, { kind: "handOff" }, CONTENT_SCRIPT, READY);
+
+    expect(record).not.toHaveBeenCalled();
+  });
+
+  it("opens the popup", async () => {
+    await handleMessage(controller, { kind: "handOff" }, CONTENT_SCRIPT, READY);
+    expect(openPopup).toHaveBeenCalled();
+  });
+
+  it("survives a platform where openPopup rejects", async () => {
+    // Firefox for Android may refuse this outside a gesture it trusts. The
+    // hand-off must still work: the pending fill is recorded either way and
+    // opening the addon by hand reaches the same place.
+    spies.status.mockReturnValue({ ...LOCKED_STATUS });
+    openPopup.mockRejectedValue(new Error("openPopup requires a user gesture"));
+    const record = vi.spyOn(controller, "recordPending");
+
+    await expect(
+      handleMessage(controller, { kind: "handOff" }, CONTENT_SCRIPT, READY),
+    ).resolves.toBeUndefined();
+
+    expect(record).toHaveBeenCalled();
+  });
+
+  it("survives a platform with no openPopup at all", async () => {
+    // Accessing an undefined method throws a TypeError rather than rejecting.
+    spies.status.mockReturnValue({ ...LOCKED_STATUS });
+    BROWSER_STUB.browserAction = undefined;
+
+    await expect(
+      handleMessage(controller, { kind: "handOff" }, CONTENT_SCRIPT, READY),
+    ).resolves.toBeUndefined();
+  });
+
+  it("records nothing for a tab whose URL will not parse", async () => {
+    spies.status.mockReturnValue({ ...LOCKED_STATUS });
+    const record = vi.spyOn(controller, "recordPending");
+    const odd: browser.runtime.MessageSender = {
+      id: THIS_EXTENSION_ID,
+      tab: { id: 7, url: "::::" } as browser.tabs.Tab,
+    };
+
+    await expect(
+      handleMessage(controller, { kind: "handOff" }, odd, READY),
+    ).resolves.toBeUndefined();
+
+    expect(record).not.toHaveBeenCalled();
   });
 });
