@@ -42,7 +42,26 @@ export function handleMessage(
 ): Promise<Response> | undefined {
   if (sender.id !== browser.runtime.id) return undefined;
   if (!isRequest(msg)) return undefined;
-  return dispatch(controller, msg, ready);
+  return dispatch(controller, msg, ready, sender);
+}
+
+/**
+ * The tab a request is about, resolved by the background page rather than
+ * named by the caller.
+ *
+ * A content script has `sender.tab` and is never asked — its own tab is the
+ * only correct answer for it, and querying the active tab as well would
+ * answer a background tab's question with the foreground one. The popup has
+ * no tab of its own, so the active tab is looked up here, which also moves
+ * `browser.tabs.query` out of the popup and into the page that holds the
+ * permission to read a tab's URL.
+ */
+async function resolveTabFor(
+  sender: browser.runtime.MessageSender,
+): Promise<browser.tabs.Tab | null> {
+  if (sender.tab !== undefined) return sender.tab;
+  const [active] = await browser.tabs.query({ active: true, currentWindow: true });
+  return active ?? null;
 }
 
 /**
@@ -67,6 +86,7 @@ async function dispatch(
   controller: Controller,
   msg: Request,
   ready: Promise<void>,
+  sender: browser.runtime.MessageSender,
 ): Promise<Response> {
   try {
     await ready;
@@ -86,10 +106,20 @@ async function dispatch(
       return controller.signOut();
     case "list":
       return controller.list(msg.query);
-    case "matches":
-      return controller.matchesFor(msg.pageUrl);
+    case "matches": {
+      const tab = await resolveTabFor(sender);
+      return controller.matchesFor(tab?.url);
+    }
     case "fill":
       return controller.fill(msg.tabId, msg.itemId);
+    case "fillFromPage": {
+      // Not resolveTabFor: this request only ever comes from a content
+      // script, which always has a tab. Falling back to the active tab for a
+      // tabless sender would fill a tab that nobody named.
+      const tabId = sender.tab?.id;
+      if (tabId === undefined) throw new Error("No tab to fill");
+      return controller.fill(tabId, msg.itemId);
+    }
     case "totp":
       return controller.totpFor(msg.itemId);
     case "setup":

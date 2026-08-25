@@ -28,6 +28,10 @@ const BROWSER_STUB = {
     },
   },
   storage: { local: { get: async () => ({}), set: async () => {}, remove: async () => {} } },
+  // `matches` and `handOff` resolve the tab themselves rather than trusting
+  // the caller, and fall back to the active tab when the sender has none
+  // (the popup). Overridden per test where the answer matters.
+  tabs: { query: async (): Promise<Array<{ id?: number; url?: string }>> => [] },
 };
 vi.stubGlobal("browser", BROWSER_STUB);
 
@@ -78,7 +82,9 @@ function makeSpies(c: Controller) {
     lock: vi.spyOn(c, "lock").mockReturnValue(undefined),
     signOut: vi.spyOn(c, "signOut").mockResolvedValue(undefined),
     list: vi.spyOn(c, "list").mockResolvedValue([]),
-    matchesFor: vi.spyOn(c, "matchesFor").mockResolvedValue([]),
+  matchesFor: vi
+      .spyOn(c, "matchesFor")
+      .mockResolvedValue({ state: "unlocked", items: [] }),
     fill: vi.spyOn(c, "fill").mockResolvedValue(undefined),
     totpFor: vi.spyOn(c, "totpFor").mockResolvedValue({ code: "123456", secondsRemaining: 30 }),
     setup: vi.spyOn(c, "setup").mockResolvedValue({ ok: true }),
@@ -120,7 +126,7 @@ const EVERY_KIND: unknown[] = [
   { kind: "lock" },
   { kind: "signOut" },
   { kind: "list", query: "" },
-  { kind: "matches", pageUrl: "https://github.com/" },
+  { kind: "matches" },
   { kind: "fill", tabId: 7, itemId: "c1" },
   { kind: "totp", itemId: "c1" },
   { kind: "setup", serverUrl: "https://v.test", email: "a@b.com", password: "p", pin: "135790" },
@@ -183,8 +189,8 @@ describe("handleMessage request validation", () => {
     ["unlock with a null pin", { kind: "unlock", pin: null }],
     ["list with no query", { kind: "list" }],
     ["list with a non-string query", { kind: "list", query: { toLowerCase: null } }],
-    ["matches with no pageUrl", { kind: "matches" }],
-    ["matches with a non-string pageUrl", { kind: "matches", pageUrl: 1 }],
+    ["fillFromPage with no itemId", { kind: "fillFromPage" }],
+    ["fillFromPage with a non-string itemId", { kind: "fillFromPage", itemId: 7 }],
     ["fill with no tabId", { kind: "fill", itemId: "c1" }],
     ["fill with a string tabId", { kind: "fill", tabId: "7", itemId: "c1" }],
     ["fill with a NaN tabId", { kind: "fill", tabId: Number.NaN, itemId: "c1" }],
@@ -288,7 +294,8 @@ describe("handleMessage routing", () => {
     await handleMessage(controller, { kind: "list", query: "git" }, SELF, READY);
     expect(spies.list).toHaveBeenCalledWith("git");
 
-    await handleMessage(controller, { kind: "matches", pageUrl: "https://github.com/" }, SELF, READY);
+    BROWSER_STUB.tabs.query = async () => [{ id: 3, url: "https://github.com/" }];
+    await handleMessage(controller, { kind: "matches" }, SELF, READY);
     expect(spies.matchesFor).toHaveBeenCalledWith("https://github.com/");
 
     await handleMessage(controller, { kind: "fill", tabId: 7, itemId: "c1" }, SELF, READY);
@@ -429,5 +436,62 @@ describe("background page startup", () => {
     const listener = await startBackground(() => new Promise<Record<string, unknown>>(() => {}));
     expect(listener({ kind: "status" }, FOREIGN)).toBeUndefined();
     expect(listener({ kind: "nope" }, SELF)).toBeUndefined();
+  });
+});
+
+describe("the background page resolves the tab itself", () => {
+  const CONTENT_SCRIPT: browser.runtime.MessageSender = {
+    id: THIS_EXTENSION_ID,
+    tab: { id: 7, url: "https://real.example/login" } as browser.tabs.Tab,
+  };
+
+  it("reads the page URL from the sender's tab, not from the message", async () => {
+    // The payload carries a URL the caller would prefer we used. It must be
+    // ignored: a content script runs on pages we do not control and does not
+    // get to name the origin its matches are computed against. The extra key
+    // is simply not part of the request shape any more, so this also pins
+    // that a stray one cannot sneak back in as a source of truth.
+    BROWSER_STUB.tabs.query = async () => [{ id: 99, url: "https://attacker.example/" }];
+
+    await handleMessage(
+      controller,
+      { kind: "matches", pageUrl: "https://attacker.example/" },
+      CONTENT_SCRIPT,
+      READY,
+    );
+
+    expect(spies.matchesFor).toHaveBeenCalledWith("https://real.example/login");
+  });
+
+  it("falls back to the active tab when the sender is the popup, which has no tab", async () => {
+    BROWSER_STUB.tabs.query = async () => [{ id: 3, url: "https://active.example/login" }];
+
+    await handleMessage(controller, { kind: "matches" }, SELF, READY);
+
+    expect(spies.matchesFor).toHaveBeenCalledWith("https://active.example/login");
+  });
+
+  it("answers with no matches when neither the sender nor the active tab has a URL", async () => {
+    BROWSER_STUB.tabs.query = async () => [];
+
+    await handleMessage(controller, { kind: "matches" }, SELF, READY);
+
+    expect(spies.matchesFor).toHaveBeenCalledWith(undefined);
+  });
+
+  it("does not consult the active tab when the sender already has one", async () => {
+    // A content script's own tab is the only correct answer for it. Querying
+    // the active tab as well would fill the foreground tab for a message that
+    // came from a background one.
+    let queried = false;
+    BROWSER_STUB.tabs.query = async () => {
+      queried = true;
+      return [{ id: 99, url: "https://foreground.example/" }];
+    };
+
+    await handleMessage(controller, { kind: "matches" }, CONTENT_SCRIPT, READY);
+
+    expect(queried).toBe(false);
+    expect(spies.matchesFor).toHaveBeenCalledWith("https://real.example/login");
   });
 });
