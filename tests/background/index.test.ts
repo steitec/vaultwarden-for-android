@@ -495,3 +495,50 @@ describe("the background page resolves the tab itself", () => {
     expect(spies.matchesFor).toHaveBeenCalledWith("https://real.example/login");
   });
 });
+
+describe("fillFromPage", () => {
+  const CONTENT_SCRIPT: browser.runtime.MessageSender = {
+    id: THIS_EXTENSION_ID,
+    tab: { id: 7, url: "https://real.example/login" } as browser.tabs.Tab,
+  };
+
+  it("fills the sender's own tab", async () => {
+    await handleMessage(controller, { kind: "fillFromPage", itemId: "c1" }, CONTENT_SCRIPT, READY);
+    expect(spies.fill).toHaveBeenCalledWith(7, "c1");
+  });
+
+  it("refuses a page fill from a sender with no tab", async () => {
+    // The popup has no tab and must use `fill` with an explicit tabId. A
+    // tabless fillFromPage is a shape that should not exist; falling back to
+    // the active tab would fill a tab the sender never named.
+    BROWSER_STUB.tabs.query = async () => [{ id: 3, url: "https://active.example/login" }];
+
+    await expect(
+      handleMessage(controller, { kind: "fillFromPage", itemId: "c1" }, SELF, READY),
+    ).rejects.toThrow(/no tab/i);
+    expect(spies.fill).not.toHaveBeenCalled();
+  });
+
+  it("does not let the message name the tab", async () => {
+    // `tabId` is not part of the fillFromPage shape at all, so a sender that
+    // bolts one on is filling its own tab regardless.
+    await handleMessage(
+      controller,
+      { kind: "fillFromPage", itemId: "c1", tabId: 99 },
+      CONTENT_SCRIPT,
+      READY,
+    );
+    expect(spies.fill).toHaveBeenCalledWith(7, "c1");
+  });
+
+  it("hands the refusal back rather than swallowing it", async () => {
+    // Controller.fill rejects on an insecure origin, a navigated tab and an
+    // entry with no password. The content script has to hear about it: a
+    // silent no-op reads to the user as a fill that worked.
+    spies.fill.mockRejectedValueOnce(new Error("Refusing to fill on an insecure page."));
+
+    await expect(
+      handleMessage(controller, { kind: "fillFromPage", itemId: "c1" }, CONTENT_SCRIPT, READY),
+    ).rejects.toThrow(/insecure/i);
+  });
+});
