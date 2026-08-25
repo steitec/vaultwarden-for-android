@@ -1,4 +1,10 @@
-import type { ItemSummary, Request, SetupResult, Status } from "../background/messages";
+import type {
+  ItemSummary,
+  PageMatches,
+  Request,
+  SetupResult,
+  Status,
+} from "../background/messages";
 import { errorText } from "./errors";
 import {
   renderSettings,
@@ -59,6 +65,7 @@ const REQUEST_TIMEOUT_MS: Record<Request["kind"], number> = {
   matches: 4000,
   totp: 4000,
   fill: 4000,
+  fillFromPage: 4000,
   lock: 4000,
   signOut: 4000,
 
@@ -173,9 +180,30 @@ function isItemSummaryList(v: unknown): v is ItemSummary[] {
   return Array.isArray(v) && v.every((entry: unknown) => isItemSummary(entry));
 }
 
+/**
+ * `matches` no longer answers with a bare array: it distinguishes a locked
+ * vault, which cannot be consulted at all, from an unlocked one with nothing
+ * for this page. The popup only ever asks while unlocked, so "locked" here is
+ * a race with the idle timer rather than an expected answer -- and it must
+ * narrow to something, not fall through as an unvalidated shape.
+ */
+function isPageMatches(v: unknown): v is PageMatches {
+  if (typeof v !== "object" || v === null) return false;
+  if (!("state" in v)) return false;
+  if (v.state === "locked") return true;
+  if (v.state !== "unlocked") return false;
+  return "items" in v && isItemSummaryList(v.items);
+}
+
 async function requestStatus(): Promise<Status> {
   const answer = await request({ kind: "status" });
   if (!isStatus(answer)) throw new UnexpectedResponseError();
+  return answer;
+}
+
+async function requestPageMatches(): Promise<PageMatches> {
+  const answer = await request({ kind: "matches" });
+  if (!isPageMatches(answer)) throw new UnexpectedResponseError();
   return answer;
 }
 
@@ -312,6 +340,15 @@ function clearBanner(banner: HTMLElement | null): void {
   banner.hidden = true;
 }
 
+/**
+ * The active tab, for its ID alone.
+ *
+ * The popup's `fill` still names a tab; `matches` no longer names anything,
+ * because the background page reads the URL from the tab itself. What used
+ * to be read here — `tab.url`, plus a `usablePageUrl` guard for the case
+ * where `activeTab` had not been granted — is gone with it: host permissions
+ * mean the URL is always readable, and it is no longer the popup's to assert.
+ */
 async function activeTab(): Promise<browser.tabs.Tab | null> {
   try {
     const tabs = await browser.tabs.query({ active: true, currentWindow: true });
@@ -322,29 +359,14 @@ async function activeTab(): Promise<browser.tabs.Tab | null> {
 }
 
 /**
- * The tab URL, or null when there is nothing usable to match against.
- *
- * `tab.url` is genuinely absent whenever `activeTab` has not been granted for
- * that tab and on privileged pages, and an empty string is not a page — it is
- * a request for `matches` that can only ever answer "none". Returning null
- * here sends the caller straight to the full list instead.
- */
-function usablePageUrl(tab: browser.tabs.Tab | null): string | null {
-  const url = tab?.url;
-  if (typeof url !== "string" || url === "") return null;
-  return url;
-}
-
-/**
  * Page matches first: on a phone the entry you want is almost always for the
  * page you are looking at. Falls back to the whole vault when the page has no
- * matches or when there is no page URL to match against.
+ * matches, when there is no page to match against, or when the vault locked
+ * between the status answer and this one.
  */
-async function initialItems(pageUrl: string | null): Promise<ItemSummary[]> {
-  if (pageUrl !== null) {
-    const matches = await requestItems({ kind: "matches", pageUrl });
-    if (matches.length > 0) return matches;
-  }
+async function initialItems(): Promise<ItemSummary[]> {
+  const matches = await requestPageMatches();
+  if (matches.state === "unlocked" && matches.items.length > 0) return matches.items;
   return requestItems({ kind: "list", query: "" });
 }
 
@@ -565,13 +587,11 @@ export async function main(): Promise<void> {
       });
     }
 
-    const tab = await activeTab();
-    const pageUrl = usablePageUrl(tab);
-    tabId = tab?.id;
+    tabId = (await activeTab())?.id;
 
     let items: ItemSummary[];
     try {
-      items = await initialItems(pageUrl);
+      items = await initialItems();
     } catch (e) {
       // The vault can lock between the status answer and this one — the idle
       // timer does not wait for the popup.
