@@ -349,6 +349,37 @@ says what it would mean.
   and so is a visible line reading `empty` — that means the decoy was chosen
   instead and the real form was left blank.
 
+### The badge — added 2026-08-25, after the list above shipped without it
+
+The badge is the newest thing here and the first thing a user meets, and neither
+item below was on this list until it was noticed missing during a run. Both are
+device-only: the unit suite covers the message plumbing, not the rendering or the
+gesture.
+
+- [ ] **Unlocked vault, matching entry: a badge appears in the page's password
+      field, and tapping it fills both fields without the popup being opened.**
+
+- [ ] **Locked vault: the badge appears, tapping it opens nothing by itself, and
+      the fill happens after the PIN with no second tap.**
+
+  `browserAction.openPopup()` does not work on Firefox for Android (checked on
+  Nightly 156.0a1), so the badge cannot raise the unlock screen. It records the
+  intent — tab id, origin, timestamp, in memory only — and the user opens the
+  add-on. Everything past that point is the pending-fill path in
+  `src/background/pending.ts`: well covered by unit tests, never once run on a
+  device. If it is broken, the badge on a locked vault is a dead control — the
+  user taps it, unlocks, and nothing happens, with no error to explain why.
+
+  Confirm the two deliberate behaviours around it too, because both look like
+  defects from the outside and will be reported as such:
+
+  - while locked, the badge appears on **every** login page, matching entry or
+    not (design §7 — a locked vault cannot be consulted, and the alternative is
+    an unencrypted index of the vault's domains)
+  - a tab that navigates to another origin between the tap and the unlock has
+    its pending fill **discarded** rather than guessed at, as does a tap older
+    than two minutes
+
 ### Offline and sync
 
 - [ ] Turn off wifi and mobile data; the vault still unlocks and lists entries
