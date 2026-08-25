@@ -7,6 +7,7 @@ import type { SymKey } from "../../src/crypto/encstring";
 import { encryptToString } from "../../src/crypto/encstring";
 import { fromBase64, toBase64, utf8 } from "../../src/crypto/bytes";
 import { InvalidResponseError } from "../../src/api/identity";
+import { PENDING_TTL_MS } from "../../src/background/pending";
 
 const PIN = "135790";
 const userKey: SymKey = {
@@ -946,4 +947,149 @@ describe("Controller", () => {
       expect(controller.status().state).toBe("empty");
     }, 20000);
   });
+});
+
+describe("pending fill", () => {
+  const FRITZ: Seed[] = [{ id: "fb", name: "Router", uris: ["https://fritz.box"] }];
+
+  it("fills the recorded tab after a successful unlock", async () => {
+    const { controller } = await makeController({ cipherCache: await cacheOf(FRITZ) });
+    const { sendMessage } = stubTabs("https://fritz.box/login");
+    controller.recordPending({ tabId: 7, origin: "https://fritz.box", at: Date.now() });
+
+    await controller.unlock(PIN);
+
+    expect(sendMessage).toHaveBeenCalledWith(7, {
+      kind: "fill",
+      username: "octocat",
+      password: "hunter2",
+    });
+  }, 20000);
+
+  it("fills nothing when the unlock was not preceded by a tap", async () => {
+    const { controller } = await makeController({ cipherCache: await cacheOf(FRITZ) });
+    const { sendMessage } = stubTabs("https://fritz.box/login");
+
+    await controller.unlock(PIN);
+
+    expect(sendMessage).not.toHaveBeenCalled();
+  }, 20000);
+
+  it("discards the pending fill on lock, so a later unlock does not fire it", async () => {
+    const { controller } = await makeController({ cipherCache: await cacheOf(FRITZ) });
+    const { sendMessage } = stubTabs("https://fritz.box/login");
+    controller.recordPending({ tabId: 7, origin: "https://fritz.box", at: Date.now() });
+
+    controller.lock();
+    await controller.unlock(PIN);
+
+    expect(sendMessage).not.toHaveBeenCalled();
+  }, 20000);
+
+  it("consumes the pending fill, so a second unlock does not fill again", async () => {
+    const { controller } = await makeController({ cipherCache: await cacheOf(FRITZ) });
+    const { sendMessage } = stubTabs("https://fritz.box/login");
+    controller.recordPending({ tabId: 7, origin: "https://fritz.box", at: Date.now() });
+
+    await controller.unlock(PIN);
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+
+    controller.lock();
+    sendMessage.mockClear();
+    await controller.unlock(PIN);
+
+    expect(sendMessage).not.toHaveBeenCalled();
+  }, 20000);
+
+  it("does not fill when the tab navigated to another origin during the unlock", async () => {
+    // The whole reason the origin is recorded rather than the tab alone.
+    const { controller } = await makeController({ cipherCache: await cacheOf(FRITZ) });
+    const { sendMessage } = stubTabs("https://evil.example/login");
+    controller.recordPending({ tabId: 7, origin: "https://fritz.box", at: Date.now() });
+
+    await controller.unlock(PIN);
+
+    expect(sendMessage).not.toHaveBeenCalled();
+  }, 20000);
+
+  it("does not fill when the tap has gone stale", async () => {
+    const { controller } = await makeController({ cipherCache: await cacheOf(FRITZ) });
+    const { sendMessage } = stubTabs("https://fritz.box/login");
+    controller.recordPending({
+      tabId: 7,
+      origin: "https://fritz.box",
+      at: Date.now() - (PENDING_TTL_MS + 1),
+    });
+
+    await controller.unlock(PIN);
+
+    expect(sendMessage).not.toHaveBeenCalled();
+  }, 20000);
+
+  it("does not fill when several entries match the recorded tab", async () => {
+    // Nothing can pick between two entries for one origin. The popup is
+    // already open on the matches; leave the choice there.
+    const { controller } = await makeController({
+      cipherCache: await cacheOf([
+        { id: "fb1", name: "Router admin", uris: ["https://fritz.box"] },
+        { id: "fb2", name: "Router guest", uris: ["https://fritz.box"] },
+      ]),
+    });
+    const { sendMessage } = stubTabs("https://fritz.box/login");
+    controller.recordPending({ tabId: 7, origin: "https://fritz.box", at: Date.now() });
+
+    await controller.unlock(PIN);
+
+    expect(sendMessage).not.toHaveBeenCalled();
+  }, 20000);
+
+  it("does not fill when nothing matches, which is only knowable after unlocking", async () => {
+    const { controller } = await makeController({ cipherCache: await cacheOf(FRITZ) });
+    const { sendMessage } = stubTabs("https://nomatch.example/login");
+    controller.recordPending({ tabId: 7, origin: "https://nomatch.example", at: Date.now() });
+
+    await controller.unlock(PIN);
+
+    expect(sendMessage).not.toHaveBeenCalled();
+  }, 20000);
+
+  it("still refuses an insecure origin at redemption time", async () => {
+    // Proof that redemption goes through Controller.fill rather than around
+    // it: http is refused there, and recording a tap must not launder it.
+    const { controller } = await makeController({
+      cipherCache: await cacheOf([{ id: "fb", name: "Router", uris: ["http://fritz.box"] }]),
+    });
+    const { sendMessage } = stubTabs("http://fritz.box/login");
+    controller.recordPending({ tabId: 7, origin: "http://fritz.box", at: Date.now() });
+
+    await controller.unlock(PIN);
+
+    expect(sendMessage).not.toHaveBeenCalled();
+  }, 20000);
+
+  it("still refuses an entry with no password at redemption time", async () => {
+    const { controller } = await makeController({
+      cipherCache: await cacheOf([
+        { id: "fb", name: "Router", password: null, uris: ["https://fritz.box"] },
+      ]),
+    });
+    const { sendMessage } = stubTabs("https://fritz.box/login");
+    controller.recordPending({ tabId: 7, origin: "https://fritz.box", at: Date.now() });
+
+    await controller.unlock(PIN);
+
+    expect(sendMessage).not.toHaveBeenCalled();
+  }, 20000);
+
+  it("does not let a redemption failure fail the unlock itself", async () => {
+    // The user typed the right PIN. Their vault opens whatever happened to
+    // the tab they tapped.
+    const { controller } = await makeController({ cipherCache: await cacheOf(FRITZ) });
+    const get = vi.fn().mockRejectedValue(new Error("No tab with id 7"));
+    vi.stubGlobal("browser", { tabs: { get, sendMessage: vi.fn() } });
+    controller.recordPending({ tabId: 7, origin: "https://fritz.box", at: Date.now() });
+
+    await expect(controller.unlock(PIN)).resolves.not.toThrow();
+    expect(controller.status().state).toBe("unlocked");
+  }, 20000);
 });
