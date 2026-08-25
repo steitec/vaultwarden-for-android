@@ -380,3 +380,59 @@ Recorded here so they are not silently lost:
 - WebSocket push sync via `/notifications`
 - a full public suffix list, if subdomain matching proves too coarse in practice
 - a TOTP display in the popup (the background handler already exists)
+
+## Known gaps in what already ships
+
+Not features that were postponed — these are true of the current build. Each
+one will eventually be somebody's bug report, so they are written down with
+enough detail to act on rather than as a line to rediscover.
+
+### A `<select>` username field is never filled
+
+`USERNAME_SELECTOR` in `src/content/autofill.ts` matches
+`input[type="text"]`, `input[type="email"]`, `input[type="tel"]` and
+`input:not([type])`. A `<select>` is not among them.
+
+The concrete trigger is a FRITZ!Box with FRITZ!Benutzer configured: its login
+page then renders a user **dropdown** above the password field instead of a
+text input. `findLoginFields` returns `username: null`, `fillFields` skips the
+field, and the result is a filled password beside a dropdown still sitting on
+whatever it defaulted to. It looks like a partial success, which is worse than
+an obvious failure — the user submits and gets "wrong password".
+
+A fix touches two places, and the second is the one that is easy to get wrong:
+
+- `findLoginFields` — widen the candidate query. The "last candidate preceding
+  the password field" logic uses `compareDocumentPosition`, which works on any
+  `Element`, so that half needs no change. The return type does: it is
+  `HTMLInputElement | null` today.
+- `setValue` — a `<select>` is not an `HTMLInputElement`. The native-setter
+  trick there exists specifically to defeat React's and Vue's shadowed `value`
+  property on inputs and does not transfer. A select needs its `value` set and
+  a `change` event, and setting a value no `<option>` carries silently does
+  nothing — that case has to be detected rather than reported as filled.
+
+jsdom covers all of this; no device work is needed to build it.
+
+### `http://[::1]` gets no badge
+
+A fillable origin (`isFillableOrigin` allows it) that cannot be expressed as a
+manifest match pattern, so the content script is never registered there. Such
+pages keep the popup path, which still works.
+
+This one has no fix inside Manifest V2 — it is a limitation of match patterns,
+not an oversight. Recorded so nobody spends an afternoon on it. See the
+2026-08-25 design's §5.3.
+
+### The AMO reviewer note has never been through a review
+
+`docs/AMO-SUBMISSION.md` was rewritten when the badge landed, because its
+previous claims — no content script, exactly one host permission — became
+false. The new note makes specific, checkable claims about how the content
+script behaves.
+
+Before submitting: re-read it against the code rather than trusting that it
+was accurate when written, and expect more scrutiny than the old `activeTab`
+posture would have drawn. All-sites host access is ordinary for a password
+manager, and both Bitwarden and 1Password match all URLs in their content
+scripts, but it is the kind of thing a reviewer asks about.
