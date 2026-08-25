@@ -16,7 +16,7 @@ import { encryptToString, decryptToString, parseEncString } from "../crypto/encs
 import { unwrapOrgKeyMap } from "../crypto/keys";
 import { utf8, zero } from "../crypto/bytes";
 import type { SymKey } from "../crypto/encstring";
-import type { ItemSummary, SetupResult, Status, TotpCode } from "./messages";
+import type { ItemSummary, PageMatches, SetupResult, Status, TotpCode } from "./messages";
 
 export class LockedError extends Error {
   constructor() {
@@ -441,8 +441,21 @@ export class Controller {
     return searchItems(this.require(), query).map(summarize);
   }
 
-  async matchesFor(pageUrl: string): Promise<ItemSummary[]> {
-    return matchItems(this.require(), pageUrl).map(summarize);
+  /**
+   * What this page offers, if anything.
+   *
+   * Takes no URL: the background page reads it from the tab itself (see
+   * `resolveTabFor`), because the caller is now a content script running on
+   * pages this addon does not control.
+   *
+   * A locked vault answers "locked" rather than throwing. The content script
+   * needs that state to tell "cannot be consulted" apart from "nothing
+   * matches" — the first renders an unlock badge, the second renders nothing.
+   */
+  async matchesFor(pageUrl: string | undefined): Promise<PageMatches> {
+    if (this.session.state !== "unlocked") return { state: "locked" };
+    if (pageUrl === undefined) return { state: "unlocked", items: [] };
+    return { state: "unlocked", items: matchItems(this.require(), pageUrl).map(summarize) };
   }
 
   async totpFor(itemId: string): Promise<TotpCode> {

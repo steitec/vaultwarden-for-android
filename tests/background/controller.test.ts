@@ -128,6 +128,18 @@ async function cacheOf(seeds: Seed[], orgs: OrgFixture[] = []): Promise<string> 
   });
 }
 
+/**
+ * `matchesFor` answers with a state, not a bare list, so that a locked vault
+ * is distinguishable from one with nothing for this page. These tests are
+ * about the matching, so they assert on the items and fail loudly if the
+ * vault turned out to be locked when they expected otherwise.
+ */
+async function matchedItems(controller: Controller, pageUrl: string) {
+  const answer = await controller.matchesFor(pageUrl);
+  if (answer.state === "locked") throw new Error("expected an unlocked vault");
+  return answer.items;
+}
+
 const DEFAULT_SEEDS: Seed[] = [
   { id: "c1", name: "GitHub", uris: ["https://github.com"] },
 ];
@@ -262,7 +274,9 @@ describe("Controller", () => {
     const { controller } = await makeController();
     expect(controller.status().state).toBe("locked");
     await expect(controller.list("")).rejects.toThrow(/locked/i);
-    await expect(controller.matchesFor("https://github.com/")).rejects.toThrow(/locked/i);
+    // A locked vault answers "locked" rather than throwing: the content
+    // script has to tell that apart from "nothing matches here".
+    expect(await controller.matchesFor("https://github.com/")).toEqual({ state: "locked" });
     await expect(controller.totpFor("c1")).rejects.toThrow(/locked/i);
     await expect(controller.fill(7, "c1")).rejects.toThrow(/locked/i);
   }, 20000);
@@ -297,7 +311,7 @@ describe("Controller", () => {
     ]);
     expect(JSON.stringify(items)).not.toContain("hunter2");
 
-    const matches = await controller.matchesFor("https://github.com/login");
+    const matches = await matchedItems(controller, "https://github.com/login");
     expect(JSON.stringify(matches)).not.toContain("hunter2");
   }, 20000);
 
@@ -365,8 +379,8 @@ describe("Controller", () => {
   it("returns only page matches for a tab url", async () => {
     const { controller } = await makeController();
     await controller.unlock(PIN);
-    expect(await controller.matchesFor("https://gist.github.com/x")).toHaveLength(1);
-    expect(await controller.matchesFor("https://unrelated.test/")).toHaveLength(0);
+    expect(await matchedItems(controller, "https://gist.github.com/x")).toHaveLength(1);
+    expect(await matchedItems(controller, "https://unrelated.test/")).toHaveLength(0);
   }, 20000);
 
   it("generates a TOTP code for an entry that has one, and refuses for one that does not", async () => {
