@@ -33,9 +33,17 @@ vi.stubGlobal("browser", {
   },
 });
 
-const { findLoginFields, fillFields, refreshBadge } = await import(
-  "../../src/content/autofill"
-);
+const { findLoginFields, fillFields, refreshBadge, startObserving, stopPageWatch } =
+  await import("../../src/content/autofill");
+
+// Importing the module installs a document watch, exactly as it does in a
+// real page. Every test below drives refreshBadge or its own observer
+// explicitly, so the module's own one is stopped here rather than left to
+// fire into whichever test happens to mutate the DOM.
+stopPageWatch();
+
+/** Comfortably past the observer's internal debounce. */
+const REFRESH_DEBOUNCE = 400;
 const { BADGE_HOST_ATTR } = await import("../../src/content/badge");
 
 function setBody(html: string) {
@@ -697,8 +705,126 @@ describe("the module-scope lookup", () => {
     sendMessage.mockReset();
     sendMessage.mockResolvedValue({ state: "unlocked", items: [] });
 
-    await import("../../src/content/autofill");
+    const fresh = await import("../../src/content/autofill");
 
     await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledWith({ kind: "matches" }));
+
+    // This evaluation installed its own document watch. Leaving it running
+    // would have it fire into every test that runs after this one.
+    fresh.stopPageWatch();
+  });
+});
+
+describe("startObserving", () => {
+  function badge(): HTMLElement | null {
+    const el = document.querySelector(`[${BADGE_HOST_ATTR}]`);
+    return el instanceof HTMLElement ? el : null;
+  }
+
+  let stopCurrent: (() => void) | null = null;
+
+  function observe(): void {
+    stopCurrent = startObserving(document);
+  }
+
+  beforeEach(() => {
+    sendMessage.mockReset();
+    setBody("");
+  });
+
+  afterEach(() => {
+    // Registered here rather than at the end of each test: a test that fails
+    // before its own stop() would otherwise leak a live observer into every
+    // test after it, and the resulting failures point everywhere but here.
+    stopCurrent?.();
+    stopCurrent = null;
+    vi.useRealTimers();
+  });
+
+  it("renders a badge for a form that mounts after the page settled", async () => {
+    // The case a one-shot lookup at document_idle misses entirely: a
+    // single-page app that renders its login form later.
+    vi.useFakeTimers();
+    sendMessage.mockResolvedValue({ state: "unlocked", items: [{ id: "a", name: "Router" }] });
+    observe();
+
+    setBody(`<input type="password">`);
+    await vi.advanceTimersByTimeAsync(REFRESH_DEBOUNCE);
+
+    expect(badge()).not.toBeNull();
+  });
+
+  it("coalesces mutations arriving in separate batches into one lookup", async () => {
+    // A framework render mutates the DOM repeatedly as it works. One
+    // background message per batch would be a message storm on every page the
+    // user opens, on a phone.
+    //
+    // The awaits are the whole point: a MutationObserver already coalesces
+    // everything done in ONE microtask into a single callback, so a loop
+    // without them proves nothing about this debounce -- it passes just as
+    // well with the debounce removed. Yielding between mutations is what
+    // makes the observer fire repeatedly and puts the timer reset under test.
+    vi.useFakeTimers();
+    setBody(`<input type="password">`);
+    sendMessage.mockResolvedValue({ state: "unlocked", items: [] });
+    observe();
+
+    for (let i = 0; i < 5; i++) {
+      document.body.appendChild(document.createElement("div"));
+      await Promise.resolve();
+    }
+    await vi.advanceTimersByTimeAsync(REFRESH_DEBOUNCE);
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not react to the badge it mounted itself", async () => {
+    // refreshBadge appends the badge host, which is itself a mutation.
+    // Reacting to it would schedule another lookup after every render,
+    // forever.
+    vi.useFakeTimers();
+    setBody(`<input type="password">`);
+    sendMessage.mockResolvedValue({ state: "unlocked", items: [{ id: "a", name: "Router" }] });
+    observe();
+
+    document.body.appendChild(document.createElement("div"));
+    await vi.advanceTimersByTimeAsync(REFRESH_DEBOUNCE);
+    const afterFirst = sendMessage.mock.calls.length;
+
+    await vi.advanceTimersByTimeAsync(REFRESH_DEBOUNCE * 4);
+
+    expect(sendMessage.mock.calls.length).toBe(afterFirst);
+  });
+
+  it("stops looking once disconnected", async () => {
+    vi.useFakeTimers();
+    sendMessage.mockResolvedValue({ state: "unlocked", items: [] });
+    observe();
+    stopCurrent?.();
+
+    setBody(`<input type="password">`);
+    await vi.advanceTimersByTimeAsync(REFRESH_DEBOUNCE * 4);
+
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("drops a lookup that was still pending when it was stopped", async () => {
+    // disconnect() discards records the observer has not delivered yet, but
+    // it does nothing about a timer that has already been scheduled -- that
+    // has to be cleared alongside it.
+    //
+    // The await is load-bearing: without it the observer callback has not run
+    // by the time stop() is called, there is no timer yet, and the test
+    // passes for a reason that has nothing to do with what it claims.
+    vi.useFakeTimers();
+    sendMessage.mockResolvedValue({ state: "unlocked", items: [] });
+    observe();
+
+    setBody(`<input type="password">`);
+    await Promise.resolve();
+    stopCurrent?.();
+    await vi.advanceTimersByTimeAsync(REFRESH_DEBOUNCE * 4);
+
+    expect(sendMessage).not.toHaveBeenCalled();
   });
 });

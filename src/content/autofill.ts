@@ -1,4 +1,4 @@
-import { mountBadge, type BadgeMode } from "./badge";
+import { mountBadge, BADGE_HOST_ATTR, type BadgeMode } from "./badge";
 import type { PageMatches } from "../background/messages";
 
 const USERNAME_SELECTOR = [
@@ -305,6 +305,58 @@ async function onTap(mode: BadgeMode, itemId: string | null): Promise<void> {
   }
 }
 
+const REFRESH_DEBOUNCE_MS = 300;
+
+/**
+ * Watches for a login form that mounts after the page has settled.
+ *
+ * Single-page apps render their form well after document_idle, so a one-shot
+ * lookup misses them entirely. Debounced hard, because a framework render
+ * mutates the DOM dozens of times in a frame and one background message per
+ * mutation would be a message storm on every page load — on a phone.
+ *
+ * The badge's own host is skipped. refreshBadge appends it to the document,
+ * which is itself a mutation; reacting to that would schedule another lookup
+ * after every render, forever.
+ */
+function isBadgeNode(n: Node): boolean {
+  if (!(n instanceof Element)) return false;
+  return n.hasAttribute(BADGE_HOST_ATTR) || n.closest(`[${BADGE_HOST_ATTR}]`) !== null;
+}
+
+/** Whether a record describes nothing but the badge appearing or leaving. */
+function isBadgeOnly(r: MutationRecord): boolean {
+  const touched = [...r.addedNodes, ...r.removedNodes];
+  return touched.length > 0 && touched.every(isBadgeNode);
+}
+
+export function startObserving(doc: Document): () => void {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  const observer = new MutationObserver((records) => {
+    // Mounting the badge appends its host to the document, which is itself a
+    // mutation. Reacting to it would schedule another lookup after every
+    // render, forever. The record's TARGET cannot distinguish this -- the
+    // host is appended to `body`, exactly like any page-made node -- so the
+    // added and removed nodes are what get inspected.
+    if (records.every(isBadgeOnly)) return;
+
+    if (timer !== null) clearTimeout(timer);
+    timer = setTimeout(() => {
+      timer = null;
+      void refreshBadge(doc);
+    }, REFRESH_DEBOUNCE_MS);
+  });
+
+  observer.observe(doc.documentElement, { childList: true, subtree: true });
+
+  return () => {
+    if (timer !== null) clearTimeout(timer);
+    timer = null;
+    observer.disconnect();
+  };
+}
+
 // The content script's entry point.
 //
 // This MUST stay at the very bottom of the module. `refreshBadge` is a
@@ -319,3 +371,14 @@ async function onTap(mode: BadgeMode, itemId: string | null): Promise<void> {
 // report to, and refreshBadge already swallows its own failures rather than
 // surfacing this addon's errors onto somebody else's page.
 void refreshBadge(document);
+
+/**
+ * The document watch this content script installs, and its teardown.
+ *
+ * Exported because it is a live side effect of importing this module: nothing
+ * in the extension ever calls it, but a test that imports this file inherits
+ * a running MutationObserver on its document and has no other way to be rid
+ * of it. Making that reachable is better than leaving each test to discover
+ * it through interference.
+ */
+export const stopPageWatch = startObserving(document);
