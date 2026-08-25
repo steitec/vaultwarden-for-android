@@ -80,6 +80,9 @@ already seen, in either channel. So confirm these in `src/manifest.json` first.
   Self-distribution requires one, and this ID is what ties every future update to
   the same installed add-on. Do not change it once something is installed.
 - **`version` is one you have not signed before.** It is `0.1.0` on a fresh tree.
+  Version numbers are unique across *both* AMO channels, so a number spent on a
+  private unlisted build can never be reused for a public listed one. Stay in
+  `0.x` while testing privately and keep `1.0.0` for the public launch.
 - **`gecko_android` is present.** It is, at `strict_min_version: 121.0`.
 
 Note on that 121: the *install-from-file* flow needs Firefox 122, so 121 promises
@@ -219,15 +222,43 @@ worth knowing before you commit to this: an add-on carrying `update_url` cannot
 be submitted to the listed channel. If going public is ever plausible, stay
 manual.
 
-## Going public later, if you ever want to
+## Going public later
 
-The ID stays yours. Publishing means submitting a **listed** version of the same
-add-on — `docs/AMO-SUBMISSION.md` holds that material: the reviewer notes, the
-source-code submission, the build instructions, the icon rationale. Nothing in
-this document blocks that, and nothing here has to be undone first.
+Nothing here has to be undone first, and none of it is throwaway work. **One
+add-on on AMO can carry versions in both channels**, chosen per version, and
+Mozilla names "a self-distributed pre-release channel" as an intended use of
+exactly that. Private testing now and a public listing later is the supported
+shape, not a workaround:
 
-The one thing to keep in mind: listed means human review, a public listing page,
-and a version number you cannot take back.
+```
+0.1.0  unlisted   only on your phone
+0.2.0  unlisted   ...
+1.0.0  listed     public, reviewed, on the listing page
+```
+
+Same add-on entry, same id, one Developer Hub page for both. The unlisted
+versions stay invisible after the listed one appears — publishing 1.0.0 does not
+retroactively expose 0.1.0 to anyone.
+
+Three rules follow from that, and all three are cheap now and expensive later:
+
+1. **Version numbers are unique across both channels, and a version's channel is
+   permanent.** Spend `0.x` privately; keep `1.0.0` for the launch.
+2. **Do not add `update_url`** (see *Updating later*). It buys automatic updates
+   for one user and costs the ability to submit listed at all.
+3. **Keep `docs/AMO-SUBMISSION.md` true as the code changes.** The reviewer notes
+   there are the long pole of a listed submission, and they are already written.
+
+When the time comes, `docs/AMO-SUBMISSION.md` is the document — reviewer notes,
+source-code submission, build instructions, the icon rationale. The difference is
+only what listed adds: human review, a public listing page, and a version number
+that cannot be taken back.
+
+**The gate before that step** is not a signing question. It is the manual
+verification checklist in `docs/DEVELOPMENT.md` — the host-permission prompt,
+first-run setup against a real server, the PIN lockout, the off-screen decoy
+field. Nothing in the automated suites covers those, and they are what would
+otherwise fail in a stranger's hands.
 
 ## Troubleshooting
 
@@ -248,3 +279,5 @@ and a version number you cannot take back.
   <https://extensionworkshop.com/documentation/publish/self-distribution/>
 - Signing and distribution overview:
   <https://extensionworkshop.com/documentation/publish/signing-and-distribution-overview/>
+- Mixing listed and unlisted versions of one add-on:
+  <https://blog.mozilla.org/addons/2017/01/26/mixing-listed-and-unlisted-on-amo/>
