@@ -14,9 +14,53 @@ describe("manifest", () => {
     expect(bss.gecko_android?.strict_min_version).toBe("121.0");
   });
 
-  it("requests no ambient host permissions", () => {
-    expect(manifest.permissions).toEqual(["storage", "activeTab"]);
+  it("holds host permissions for every fillable origin, and no more", () => {
+    // This reverses §7.1 of the original design deliberately. The badge has
+    // to render before the user has touched the addon, and nothing renders
+    // on a page the extension has no host access to. `<all_urls>` is still
+    // refused: it would cover ftp:, file: and every other scheme, none of
+    // which this addon fills into.
+    expect(manifest.permissions).toEqual([
+      "storage",
+      "https://*/*",
+      "http://localhost/*",
+      "http://127.0.0.1/*",
+    ]);
     expect(JSON.stringify(manifest)).not.toContain("<all_urls>");
+  });
+
+  it("no longer requests activeTab, which host permissions supersede", () => {
+    expect(manifest.permissions).not.toContain("activeTab");
+  });
+
+  it("declares the content script on exactly the origins a fill is allowed on", () => {
+    // The match list mirrors isFillableOrigin so a badge cannot appear where
+    // a fill would be refused. http://[::1] is fillable but is not an
+    // expressible match pattern, so it keeps the popup path only — a known
+    // and accepted gap, recorded in the 2026-08-25 design's §5.3.
+    const scripts = (manifest as typeof manifest & {
+      content_scripts: Array<{ matches: string[]; js: string[]; run_at?: string }>;
+    }).content_scripts;
+
+    expect(scripts).toHaveLength(1);
+    const script = scripts[0];
+    // Explicit narrowing rather than `!`: noUncheckedIndexedAccess is on, and
+    // this file asserts on a shape it reads from JSON.
+    if (script === undefined) throw new Error("expected exactly one content script");
+
+    expect(script.matches).toEqual([
+      "https://*/*",
+      "http://localhost/*",
+      "http://127.0.0.1/*",
+    ]);
+    expect(script.js).toEqual(["autofill.js"]);
+    expect(script.run_at).toBe("document_idle");
+
+    // Filling inside third-party iframes is the classic exfiltration vector
+    // for autofill extensions, and nothing in the field detection reasons
+    // about frame ancestry. Absent means false; asserting on the absence
+    // keeps a later `true` from slipping in unnoticed.
+    expect(script).not.toHaveProperty("all_frames");
   });
 
   it("declares optional host access as https-only", () => {
@@ -29,7 +73,12 @@ describe("manifest", () => {
     // never actually held — but it must not be requestable either.
     expect(manifest.optional_permissions).toEqual(["https://*/*"]);
 
-    const json = JSON.stringify(manifest);
+    // Scoped to optional_permissions rather than the whole manifest: since
+    // the badge landed, `permissions` legitimately contains http loopback
+    // patterns. What must stay https-only is the grant the SERVER origin is
+    // requested under — that is the one carrying the master password hash
+    // and every bearer token.
+    const json = JSON.stringify(manifest.optional_permissions);
     expect(json).not.toContain("*://*/*");
     expect(json).not.toContain("http://");
     expect(json).not.toContain("<all_urls>");
@@ -57,8 +106,12 @@ describe("manifest", () => {
     expect(gecko.data_collection_permissions?.required).toEqual(["none"]);
   });
 
-  it("declares no content scripts", () => {
-    const m = manifest as typeof manifest & { content_scripts?: unknown };
-    expect(m.content_scripts).toBeUndefined();
+  it("keeps plain http out of everything except the two loopback hosts", () => {
+    // The replacement for the old blanket "no http:// anywhere" assertion.
+    // isFillableOrigin allows http on loopback only, and the manifest must
+    // not quietly widen that: `http://*/*` here would put a badge on every
+    // plaintext page on the internet.
+    const httpPatterns = manifest.permissions.filter((p) => p.startsWith("http://"));
+    expect(httpPatterns).toEqual(["http://localhost/*", "http://127.0.0.1/*"]);
   });
 });
