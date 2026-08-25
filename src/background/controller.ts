@@ -16,6 +16,7 @@ import { encryptToString, decryptToString, parseEncString } from "../crypto/encs
 import { unwrapOrgKeyMap } from "../crypto/keys";
 import { utf8, zero } from "../crypto/bytes";
 import type { SymKey } from "../crypto/encstring";
+import { isRedeemable, type PendingFill } from "./pending";
 import type { ItemSummary, PageMatches, SetupResult, Status, TotpCode } from "./messages";
 
 export class LockedError extends Error {
@@ -108,6 +109,15 @@ export class Controller {
    */
   private items: VaultItem[] = [];
 
+  /**
+   * A badge tap that landed on a locked vault, waiting for the unlock.
+   *
+   * Deliberately in memory only. A background-page restart loses it, which is
+   * the safe direction: the alternative is a fill intent that outlives the
+   * process that knew why it existed.
+   */
+  private pending: PendingFill | null = null;
+
   constructor(private session: Session) {
     // The session leaves the unlocked state on paths that never touch this
     // class: the idle timer fires on its own, and both `Session.signOut()`
@@ -120,6 +130,11 @@ export class Controller {
     // state to review for.
     session.onLock = () => {
       this.items = [];
+      // The same hook, for the same reason. A pending fill is an intent to
+      // hand out a credential; a lock must discard it along with the
+      // plaintext, on every path that reaches here -- the idle timer,
+      // signOut, and Session.init's re-entrancy guard alike.
+      this.pending = null;
     };
   }
 
@@ -150,6 +165,49 @@ export class Controller {
   async unlock(pin: string): Promise<void> {
     await this.session.unlockWithPin(pin);
     await this.loadFromCache();
+    await this.redeemPending();
+  }
+
+  /** Records a badge tap made against a locked vault. */
+  recordPending(p: PendingFill): void {
+    this.pending = p;
+  }
+
+  /**
+   * Turns a tap recorded against a locked vault into a fill.
+   *
+   * Every failure is silent and total. The pending fill is consumed first, so
+   * no path can fill twice, and nothing that happened to the tab in the
+   * meantime may fail the unlock the user actually asked for -- they typed
+   * the right PIN, so their vault opens either way.
+   *
+   * `fill` is called unchanged rather than reimplemented, so every guard it
+   * already runs applies again here: isFillableOrigin, the uriMatches recheck
+   * against the tab's current URL, and the refusal for an entry with no
+   * password. This is an intent to call it, never a way around it.
+   */
+  private async redeemPending(): Promise<void> {
+    const p = this.pending;
+    this.pending = null;
+    if (p === null) return;
+
+    try {
+      const tab = await browser.tabs.get(p.tabId);
+      if (!isRedeemable(p, tab.url, Date.now())) return;
+
+      // Non-null by isRedeemable, which refuses an undefined url.
+      const url = tab.url ?? "";
+      const matches = matchItems(this.require(), url);
+      // Exactly one, or nothing. Several entries for one origin is a choice
+      // only the user can make, and the popup is already open on them.
+      const only = matches.length === 1 ? matches[0] : undefined;
+      if (only === undefined) return;
+
+      await this.fill(p.tabId, only.id);
+    } catch {
+      // A closed tab, a navigated tab, an entry fill() refuses. None of them
+      // are the unlock's problem.
+    }
   }
 
   /**
