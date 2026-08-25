@@ -1,3 +1,6 @@
+import { mountBadge, BADGE_HOST_ATTR, type BadgeMode } from "./badge";
+import type { PageMatches } from "../background/messages";
+
 const USERNAME_SELECTOR = [
   'input[type="text"]',
   'input[type="email"]',
@@ -235,3 +238,147 @@ browser.runtime.onMessage.addListener((msg: unknown, sender: browser.runtime.Mes
   if (!isFillMessage(msg)) return undefined;
   return Promise.resolve(fillFields(document, { username: msg.username, password: msg.password }));
 });
+
+
+let unmountBadge: (() => void) | null = null;
+
+/**
+ * Decide what this page can offer, and offer it.
+ *
+ * The order matters. The password field is looked for BEFORE the background
+ * page is asked anything, so a page with no login form never produces a
+ * message at all: the background page learns nothing about the ordinary
+ * browsing of someone who is not signing in to something.
+ */
+export async function refreshBadge(doc: Document): Promise<void> {
+  unmountBadge?.();
+  unmountBadge = null;
+
+  const { password } = findLoginFields(doc);
+  if (password === null) return;
+
+  let matches: PageMatches;
+  try {
+    matches = await browser.runtime.sendMessage({ kind: "matches" });
+  } catch {
+    // The background page is locked out, restarting, or gone. Leave the page
+    // untouched: a content script must not surface this addon's errors onto
+    // somebody else's site.
+    return;
+  }
+
+  const mode = modeFor(matches);
+  if (mode === null) return;
+
+  // The item id is carried only for the single-match case. Everything else
+  // hands off to the popup, which is where a choice can actually be made.
+  const only = matches.state === "unlocked" && matches.items.length === 1 ? matches.items[0] : undefined;
+  const itemId = only?.id ?? null;
+
+  unmountBadge = mountBadge(password, mode, () => {
+    void onTap(mode, itemId);
+  });
+}
+
+/**
+ * A locked vault gets a badge whether or not anything matches, because it
+ * cannot be asked — see the 2026-08-25 design's §7. The cost is a badge on
+ * login pages with no entry; the alternative is an unencrypted index of every
+ * domain in the vault, which is worse.
+ */
+function modeFor(matches: PageMatches): BadgeMode | null {
+  if (matches.state === "locked") return "unlock";
+  if (matches.items.length === 0) return null;
+  return matches.items.length === 1 ? "fill" : "chooser";
+}
+
+async function onTap(mode: BadgeMode, itemId: string | null): Promise<void> {
+  try {
+    if (mode === "fill" && itemId !== null) {
+      await browser.runtime.sendMessage({ kind: "fillFromPage", itemId });
+      return;
+    }
+    await browser.runtime.sendMessage({ kind: "handOff" });
+  } catch {
+    // A refused fill, or a handOff whose handler does not exist yet. Nothing
+    // to do on the page: the background page owns the user-facing report.
+  }
+}
+
+const REFRESH_DEBOUNCE_MS = 300;
+
+/**
+ * Watches for a login form that mounts after the page has settled.
+ *
+ * Single-page apps render their form well after document_idle, so a one-shot
+ * lookup misses them entirely. Debounced hard, because a framework render
+ * mutates the DOM dozens of times in a frame and one background message per
+ * mutation would be a message storm on every page load — on a phone.
+ *
+ * The badge's own host is skipped. refreshBadge appends it to the document,
+ * which is itself a mutation; reacting to that would schedule another lookup
+ * after every render, forever.
+ */
+function isBadgeNode(n: Node): boolean {
+  if (!(n instanceof Element)) return false;
+  return n.hasAttribute(BADGE_HOST_ATTR) || n.closest(`[${BADGE_HOST_ATTR}]`) !== null;
+}
+
+/** Whether a record describes nothing but the badge appearing or leaving. */
+function isBadgeOnly(r: MutationRecord): boolean {
+  const touched = [...r.addedNodes, ...r.removedNodes];
+  return touched.length > 0 && touched.every(isBadgeNode);
+}
+
+export function startObserving(doc: Document): () => void {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  const observer = new MutationObserver((records) => {
+    // Mounting the badge appends its host to the document, which is itself a
+    // mutation. Reacting to it would schedule another lookup after every
+    // render, forever. The record's TARGET cannot distinguish this -- the
+    // host is appended to `body`, exactly like any page-made node -- so the
+    // added and removed nodes are what get inspected.
+    if (records.every(isBadgeOnly)) return;
+
+    if (timer !== null) clearTimeout(timer);
+    timer = setTimeout(() => {
+      timer = null;
+      void refreshBadge(doc);
+    }, REFRESH_DEBOUNCE_MS);
+  });
+
+  observer.observe(doc.documentElement, { childList: true, subtree: true });
+
+  return () => {
+    if (timer !== null) clearTimeout(timer);
+    timer = null;
+    observer.disconnect();
+  };
+}
+
+// The content script's entry point.
+//
+// This MUST stay at the very bottom of the module. `refreshBadge` is a
+// hoisted function declaration, so calling it from higher up compiles and
+// looks fine -- but its first statement touches `unmountBadge`, a `let`
+// declared above, and from anywhere before that declaration the call lands
+// in the temporal dead zone. The ReferenceError is then swallowed by the
+// `void` below, and the failure mode is a badge that silently never appears.
+// That shipped once; `tests/content/autofill.test.ts` pins it now.
+//
+// Fire-and-forget is deliberate beyond that: a content script has nobody to
+// report to, and refreshBadge already swallows its own failures rather than
+// surfacing this addon's errors onto somebody else's page.
+void refreshBadge(document);
+
+/**
+ * The document watch this content script installs, and its teardown.
+ *
+ * Exported because it is a live side effect of importing this module: nothing
+ * in the extension ever calls it, but a test that imports this file inherits
+ * a running MutationObserver on its document and has no other way to be rid
+ * of it. Making that reachable is better than leaving each test to discover
+ * it through interference.
+ */
+export const stopPageWatch = startObserving(document);

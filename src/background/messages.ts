@@ -34,6 +34,21 @@ export type Status = {
 export type TotpCode = { code: string; secondsRemaining: number };
 
 /**
+ * What a `matches` request answers with.
+ *
+ * "locked" is a distinct state rather than an error because the content
+ * script has to tell "the vault cannot be consulted" apart from "nothing
+ * matches this page": the first renders an unlock badge, the second renders
+ * nothing at all. A locked vault holds no decrypted items and so cannot
+ * answer the question — see the 2026-08-25 design's §7 for why an
+ * unencrypted index of the vault's domains is not an acceptable way around
+ * that.
+ */
+export type PageMatches =
+  | { state: "locked" }
+  | { state: "unlocked"; items: ItemSummary[] };
+
+/**
  * What `setup` answers with.
  *
  * A 2FA challenge is a resolved VALUE, not a rejection, because error
@@ -70,8 +85,10 @@ export type Request =
   | { kind: "lock" }
   | { kind: "signOut" }
   | { kind: "list"; query: string }
-  | { kind: "matches"; pageUrl: string }
+  | { kind: "matches" }
   | { kind: "fill"; tabId: number; itemId: string }
+  | { kind: "fillFromPage"; itemId: string }
+  | { kind: "handOff" }
   | { kind: "totp"; itemId: string }
   | {
       kind: "setup";
@@ -84,7 +101,7 @@ export type Request =
   | { kind: "sync" };
 
 /** `void` covers the kinds that answer with an acknowledgement only. */
-export type Response = Status | ItemSummary[] | TotpCode | SetupResult | void;
+export type Response = Status | ItemSummary[] | PageMatches | TotpCode | SetupResult | void;
 
 function isString(v: unknown): v is string {
   return typeof v === "string";
@@ -126,6 +143,12 @@ export function isRequest(v: unknown): v is Request {
     case "lock":
     case "signOut":
     case "sync":
+    // `matches` carries no payload any more: the background page reads the
+    // tab's URL itself rather than accepting one from a caller, because the
+    // content script now runs on pages this addon does not control.
+    case "matches":
+    // Likewise `handOff`: the tab it concerns is the sender's own.
+    case "handOff":
       return true;
     case "setup":
       // Every field is checked, not just presence: a non-string serverUrl
@@ -147,8 +170,6 @@ export function isRequest(v: unknown): v is Request {
       return "pin" in v && isString(v.pin);
     case "list":
       return "query" in v && isString(v.query);
-    case "matches":
-      return "pageUrl" in v && isString(v.pageUrl);
     case "fill":
       return (
         "tabId" in v &&
@@ -157,6 +178,8 @@ export function isRequest(v: unknown): v is Request {
         "itemId" in v &&
         isString(v.itemId)
       );
+    case "fillFromPage":
+      return "itemId" in v && isString(v.itemId);
     case "totp":
       return "itemId" in v && isString(v.itemId);
     default:

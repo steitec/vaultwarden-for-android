@@ -95,8 +95,24 @@ let sendMessage: ReturnType<typeof vi.fn>;
 let permissionsRequest: ReturnType<typeof vi.fn>;
 let closeSpy: ReturnType<typeof vi.spyOn>;
 
+/**
+ * The tabs the fake `browser.tabs.query` reports. The default responder reads
+ * it so that `matches` behaves the way the real background page does: it
+ * resolves the tab itself and answers "unlocked, nothing" when there is no
+ * page to match against. Before the badge landed the popup made that call,
+ * and these tests encoded it by asserting `matches` was never sent.
+ */
+let installedTabs: unknown[] = [];
+
+function activeTabHasUrl(): boolean {
+  const first = installedTabs[0];
+  if (typeof first !== "object" || first === null || !("url" in first)) return false;
+  return typeof first.url === "string" && first.url !== "";
+}
+
 /** Installs the `browser` global the popup talks to. */
 function install(responder: Responder, tabs: unknown[], grant = true): void {
+  installedTabs = tabs;
   sendMessage = vi.fn((req: unknown) => Promise.resolve(responder(req)));
   permissionsRequest = vi.fn(() => Promise.resolve(grant));
   vi.stubGlobal("browser", {
@@ -116,7 +132,9 @@ function defaultResponder(overrides: Partial<Record<string, () => unknown>> = {}
       case "status":
         return UNLOCKED;
       case "matches":
-        return [item("m1", "Matched")];
+        return activeTabHasUrl()
+          ? { state: "unlocked", items: [item("m1", "Matched")] }
+          : { state: "unlocked", items: [] };
       case "list":
         return [item("l1", "Listed")];
       case "fill":
@@ -192,28 +210,33 @@ describe("popup startup", () => {
   });
 
   it("falls back to the whole vault when the page has no matches", async () => {
-    install(defaultResponder({ matches: () => [] }), [{ id: 1, url: "https://example.com/login" }]);
+    install(defaultResponder({ matches: () => ({ state: "unlocked", items: [] }) }), [
+      { id: 1, url: "https://example.com/login" },
+    ]);
     await main();
     expect(sentKinds()).toEqual(["status", "matches", "list"]);
     expect(requireEl("root").textContent).toContain("Listed");
   });
 
-  it("skips the match query when there is no active tab", async () => {
-    // tabs.query legitimately answers [] — no window, or a privileged
-    // surface. `{kind:"matches", pageUrl:""}` is not a question with a
-    // useful answer; it is a question about no page at all.
+  it("still asks for matches when there is no active tab, and falls back", async () => {
+    // The popup no longer decides whether the question is worth asking: it
+    // does not know the URL any more. The background page resolves the tab
+    // itself and answers "unlocked, nothing" when there is no page, which
+    // lands on the same list the old short-circuit did.
     install(defaultResponder(), []);
     await main();
-    expect(sentKinds()).toEqual(["status", "list"]);
+    expect(sentKinds()).toEqual(["status", "matches", "list"]);
     expect(requireEl("root").textContent).toContain("Listed");
   });
 
-  it("skips the match query when the tab has no readable url", async () => {
-    // `tab.url` is undefined whenever activeTab has not been granted for
-    // that tab, which is the normal case until the user acts.
-    install(defaultResponder(), [{ id: 1 }]);
+  it("falls back to the whole vault when the vault locked mid-flight", async () => {
+    // The idle timer does not wait for the popup. A "locked" answer to
+    // `matches` is a race, not an expected state, and it must not throw the
+    // popup's startup -- it falls through to `list`, which reports the lock
+    // properly.
+    install(defaultResponder({ matches: () => ({ state: "locked" }) }), [{ id: 1 }]);
     await main();
-    expect(sentKinds()).toEqual(["status", "list"]);
+    expect(sentKinds()).toEqual(["status", "matches", "list"]);
   });
 });
 
@@ -1009,7 +1032,9 @@ describe("stale answers", () => {
         matches: () => {
           listCalls += 1;
           // Only the first vault render is left hanging.
-          return listCalls === 1 ? stalled.promise : [item("m1", "Matched")];
+          return listCalls === 1
+            ? stalled.promise
+            : { state: "unlocked", items: [item("m1", "Matched")] };
         },
         lock: () => {
           locked = true;
@@ -1094,9 +1119,12 @@ describe("fill", () => {
   });
 
   it("does not attempt to fill an undecryptable entry", async () => {
-    install(defaultResponder({ matches: () => [item("u1", "⚠ cannot be decrypted", true)] }), [
-      { id: 7, url: "https://example.com/login" },
-    ]);
+    install(
+      defaultResponder({
+        matches: () => ({ state: "unlocked", items: [item("u1", "⚠ cannot be decrypted", true)] }),
+      }),
+      [{ id: 7, url: "https://example.com/login" }],
+    );
     await main();
     requireEl("root").querySelector(".item")?.dispatchEvent(new Event("click", { bubbles: true }));
     await vi.waitFor(() => expect(requireEl("error").hidden).toBe(false));

@@ -28,6 +28,12 @@ const BROWSER_STUB = {
     },
   },
   storage: { local: { get: async () => ({}), set: async () => {}, remove: async () => {} } },
+  // `matches` and `handOff` resolve the tab themselves rather than trusting
+  // the caller, and fall back to the active tab when the sender has none
+  // (the popup). Overridden per test where the answer matters.
+  tabs: { query: async (): Promise<Array<{ id?: number; url?: string }>> => [] },
+  // handOff opens the popup when the platform allows it. Replaced per test.
+  browserAction: undefined as { openPopup: () => Promise<void> } | undefined,
 };
 vi.stubGlobal("browser", BROWSER_STUB);
 
@@ -78,7 +84,9 @@ function makeSpies(c: Controller) {
     lock: vi.spyOn(c, "lock").mockReturnValue(undefined),
     signOut: vi.spyOn(c, "signOut").mockResolvedValue(undefined),
     list: vi.spyOn(c, "list").mockResolvedValue([]),
-    matchesFor: vi.spyOn(c, "matchesFor").mockResolvedValue([]),
+  matchesFor: vi
+      .spyOn(c, "matchesFor")
+      .mockResolvedValue({ state: "unlocked", items: [] }),
     fill: vi.spyOn(c, "fill").mockResolvedValue(undefined),
     totpFor: vi.spyOn(c, "totpFor").mockResolvedValue({ code: "123456", secondsRemaining: 30 }),
     setup: vi.spyOn(c, "setup").mockResolvedValue({ ok: true }),
@@ -120,7 +128,7 @@ const EVERY_KIND: unknown[] = [
   { kind: "lock" },
   { kind: "signOut" },
   { kind: "list", query: "" },
-  { kind: "matches", pageUrl: "https://github.com/" },
+  { kind: "matches" },
   { kind: "fill", tabId: 7, itemId: "c1" },
   { kind: "totp", itemId: "c1" },
   { kind: "setup", serverUrl: "https://v.test", email: "a@b.com", password: "p", pin: "135790" },
@@ -183,8 +191,8 @@ describe("handleMessage request validation", () => {
     ["unlock with a null pin", { kind: "unlock", pin: null }],
     ["list with no query", { kind: "list" }],
     ["list with a non-string query", { kind: "list", query: { toLowerCase: null } }],
-    ["matches with no pageUrl", { kind: "matches" }],
-    ["matches with a non-string pageUrl", { kind: "matches", pageUrl: 1 }],
+    ["fillFromPage with no itemId", { kind: "fillFromPage" }],
+    ["fillFromPage with a non-string itemId", { kind: "fillFromPage", itemId: 7 }],
     ["fill with no tabId", { kind: "fill", itemId: "c1" }],
     ["fill with a string tabId", { kind: "fill", tabId: "7", itemId: "c1" }],
     ["fill with a NaN tabId", { kind: "fill", tabId: Number.NaN, itemId: "c1" }],
@@ -288,7 +296,8 @@ describe("handleMessage routing", () => {
     await handleMessage(controller, { kind: "list", query: "git" }, SELF, READY);
     expect(spies.list).toHaveBeenCalledWith("git");
 
-    await handleMessage(controller, { kind: "matches", pageUrl: "https://github.com/" }, SELF, READY);
+    BROWSER_STUB.tabs.query = async () => [{ id: 3, url: "https://github.com/" }];
+    await handleMessage(controller, { kind: "matches" }, SELF, READY);
     expect(spies.matchesFor).toHaveBeenCalledWith("https://github.com/");
 
     await handleMessage(controller, { kind: "fill", tabId: 7, itemId: "c1" }, SELF, READY);
@@ -429,5 +438,212 @@ describe("background page startup", () => {
     const listener = await startBackground(() => new Promise<Record<string, unknown>>(() => {}));
     expect(listener({ kind: "status" }, FOREIGN)).toBeUndefined();
     expect(listener({ kind: "nope" }, SELF)).toBeUndefined();
+  });
+});
+
+describe("the background page resolves the tab itself", () => {
+  const CONTENT_SCRIPT: browser.runtime.MessageSender = {
+    id: THIS_EXTENSION_ID,
+    tab: { id: 7, url: "https://real.example/login" } as browser.tabs.Tab,
+  };
+
+  it("reads the page URL from the sender's tab, not from the message", async () => {
+    // The payload carries a URL the caller would prefer we used. It must be
+    // ignored: a content script runs on pages we do not control and does not
+    // get to name the origin its matches are computed against. The extra key
+    // is simply not part of the request shape any more, so this also pins
+    // that a stray one cannot sneak back in as a source of truth.
+    BROWSER_STUB.tabs.query = async () => [{ id: 99, url: "https://attacker.example/" }];
+
+    await handleMessage(
+      controller,
+      { kind: "matches", pageUrl: "https://attacker.example/" },
+      CONTENT_SCRIPT,
+      READY,
+    );
+
+    expect(spies.matchesFor).toHaveBeenCalledWith("https://real.example/login");
+  });
+
+  it("falls back to the active tab when the sender is the popup, which has no tab", async () => {
+    BROWSER_STUB.tabs.query = async () => [{ id: 3, url: "https://active.example/login" }];
+
+    await handleMessage(controller, { kind: "matches" }, SELF, READY);
+
+    expect(spies.matchesFor).toHaveBeenCalledWith("https://active.example/login");
+  });
+
+  it("answers with no matches when neither the sender nor the active tab has a URL", async () => {
+    BROWSER_STUB.tabs.query = async () => [];
+
+    await handleMessage(controller, { kind: "matches" }, SELF, READY);
+
+    expect(spies.matchesFor).toHaveBeenCalledWith(undefined);
+  });
+
+  it("does not consult the active tab when the sender already has one", async () => {
+    // A content script's own tab is the only correct answer for it. Querying
+    // the active tab as well would fill the foreground tab for a message that
+    // came from a background one.
+    let queried = false;
+    BROWSER_STUB.tabs.query = async () => {
+      queried = true;
+      return [{ id: 99, url: "https://foreground.example/" }];
+    };
+
+    await handleMessage(controller, { kind: "matches" }, CONTENT_SCRIPT, READY);
+
+    expect(queried).toBe(false);
+    expect(spies.matchesFor).toHaveBeenCalledWith("https://real.example/login");
+  });
+});
+
+describe("fillFromPage", () => {
+  const CONTENT_SCRIPT: browser.runtime.MessageSender = {
+    id: THIS_EXTENSION_ID,
+    tab: { id: 7, url: "https://real.example/login" } as browser.tabs.Tab,
+  };
+
+  it("fills the sender's own tab", async () => {
+    await handleMessage(controller, { kind: "fillFromPage", itemId: "c1" }, CONTENT_SCRIPT, READY);
+    expect(spies.fill).toHaveBeenCalledWith(7, "c1");
+  });
+
+  it("refuses a page fill from a sender with no tab", async () => {
+    // The popup has no tab and must use `fill` with an explicit tabId. A
+    // tabless fillFromPage is a shape that should not exist; falling back to
+    // the active tab would fill a tab the sender never named.
+    BROWSER_STUB.tabs.query = async () => [{ id: 3, url: "https://active.example/login" }];
+
+    await expect(
+      handleMessage(controller, { kind: "fillFromPage", itemId: "c1" }, SELF, READY),
+    ).rejects.toThrow(/no tab/i);
+    expect(spies.fill).not.toHaveBeenCalled();
+  });
+
+  it("does not let the message name the tab", async () => {
+    // `tabId` is not part of the fillFromPage shape at all, so a sender that
+    // bolts one on is filling its own tab regardless.
+    await handleMessage(
+      controller,
+      { kind: "fillFromPage", itemId: "c1", tabId: 99 },
+      CONTENT_SCRIPT,
+      READY,
+    );
+    expect(spies.fill).toHaveBeenCalledWith(7, "c1");
+  });
+
+  it("hands the refusal back rather than swallowing it", async () => {
+    // Controller.fill rejects on an insecure origin, a navigated tab and an
+    // entry with no password. The content script has to hear about it: a
+    // silent no-op reads to the user as a fill that worked.
+    spies.fill.mockRejectedValueOnce(new Error("Refusing to fill on an insecure page."));
+
+    await expect(
+      handleMessage(controller, { kind: "fillFromPage", itemId: "c1" }, CONTENT_SCRIPT, READY),
+    ).rejects.toThrow(/insecure/i);
+  });
+});
+
+describe("handOff", () => {
+  const CONTENT_SCRIPT: browser.runtime.MessageSender = {
+    id: THIS_EXTENSION_ID,
+    tab: { id: 7, url: "https://fritz.box/login" } as browser.tabs.Tab,
+  };
+
+  const LOCKED_STATUS = {
+    state: "locked",
+    lastSyncMs: 1000,
+    email: "a@b.com",
+    serverUrl: "https://v.example.net",
+    pinUnlockAvailable: true,
+    pinAttemptsRemaining: 5,
+  } as const;
+  const UNLOCKED_STATUS = { ...LOCKED_STATUS, state: "unlocked" } as const;
+
+  let openPopup: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    openPopup = vi.fn().mockResolvedValue(undefined);
+    BROWSER_STUB.browserAction = { openPopup };
+  });
+
+  it("records a pending fill when the vault is locked", async () => {
+    spies.status.mockReturnValue({ ...LOCKED_STATUS });
+    const record = vi.spyOn(controller, "recordPending");
+
+    await handleMessage(controller, { kind: "handOff" }, CONTENT_SCRIPT, READY);
+
+    expect(record).toHaveBeenCalledWith(
+      expect.objectContaining({ tabId: 7, origin: "https://fritz.box" }),
+    );
+  });
+
+  it("records the origin, not the whole URL", async () => {
+    // The redemption compares origins. Recording a full URL would either
+    // never match after a path change or, worse, be compared loosely.
+    spies.status.mockReturnValue({ ...LOCKED_STATUS });
+    const record = vi.spyOn(controller, "recordPending");
+
+    await handleMessage(controller, { kind: "handOff" }, CONTENT_SCRIPT, READY);
+
+    const arg = record.mock.calls[0]?.[0];
+    expect(arg?.origin).toBe("https://fritz.box");
+  });
+
+  it("records nothing when the vault is already unlocked", async () => {
+    // An unlocked multi-match tap needs the popup, not a redeemable intent.
+    // Leaving one behind would fire on some later, unrelated unlock.
+    spies.status.mockReturnValue({ ...UNLOCKED_STATUS });
+    const record = vi.spyOn(controller, "recordPending");
+
+    await handleMessage(controller, { kind: "handOff" }, CONTENT_SCRIPT, READY);
+
+    expect(record).not.toHaveBeenCalled();
+  });
+
+  it("opens the popup", async () => {
+    await handleMessage(controller, { kind: "handOff" }, CONTENT_SCRIPT, READY);
+    expect(openPopup).toHaveBeenCalled();
+  });
+
+  it("survives a platform where openPopup rejects", async () => {
+    // Firefox for Android may refuse this outside a gesture it trusts. The
+    // hand-off must still work: the pending fill is recorded either way and
+    // opening the addon by hand reaches the same place.
+    spies.status.mockReturnValue({ ...LOCKED_STATUS });
+    openPopup.mockRejectedValue(new Error("openPopup requires a user gesture"));
+    const record = vi.spyOn(controller, "recordPending");
+
+    await expect(
+      handleMessage(controller, { kind: "handOff" }, CONTENT_SCRIPT, READY),
+    ).resolves.toBeUndefined();
+
+    expect(record).toHaveBeenCalled();
+  });
+
+  it("survives a platform with no openPopup at all", async () => {
+    // Accessing an undefined method throws a TypeError rather than rejecting.
+    spies.status.mockReturnValue({ ...LOCKED_STATUS });
+    BROWSER_STUB.browserAction = undefined;
+
+    await expect(
+      handleMessage(controller, { kind: "handOff" }, CONTENT_SCRIPT, READY),
+    ).resolves.toBeUndefined();
+  });
+
+  it("records nothing for a tab whose URL will not parse", async () => {
+    spies.status.mockReturnValue({ ...LOCKED_STATUS });
+    const record = vi.spyOn(controller, "recordPending");
+    const odd: browser.runtime.MessageSender = {
+      id: THIS_EXTENSION_ID,
+      tab: { id: 7, url: "::::" } as browser.tabs.Tab,
+    };
+
+    await expect(
+      handleMessage(controller, { kind: "handOff" }, odd, READY),
+    ).resolves.toBeUndefined();
+
+    expect(record).not.toHaveBeenCalled();
   });
 });

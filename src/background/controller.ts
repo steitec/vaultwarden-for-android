@@ -16,7 +16,8 @@ import { encryptToString, decryptToString, parseEncString } from "../crypto/encs
 import { unwrapOrgKeyMap } from "../crypto/keys";
 import { utf8, zero } from "../crypto/bytes";
 import type { SymKey } from "../crypto/encstring";
-import type { ItemSummary, SetupResult, Status, TotpCode } from "./messages";
+import { isRedeemable, type PendingFill } from "./pending";
+import type { ItemSummary, PageMatches, SetupResult, Status, TotpCode } from "./messages";
 
 export class LockedError extends Error {
   constructor() {
@@ -108,6 +109,15 @@ export class Controller {
    */
   private items: VaultItem[] = [];
 
+  /**
+   * A badge tap that landed on a locked vault, waiting for the unlock.
+   *
+   * Deliberately in memory only. A background-page restart loses it, which is
+   * the safe direction: the alternative is a fill intent that outlives the
+   * process that knew why it existed.
+   */
+  private pending: PendingFill | null = null;
+
   constructor(private session: Session) {
     // The session leaves the unlocked state on paths that never touch this
     // class: the idle timer fires on its own, and both `Session.signOut()`
@@ -120,6 +130,11 @@ export class Controller {
     // state to review for.
     session.onLock = () => {
       this.items = [];
+      // The same hook, for the same reason. A pending fill is an intent to
+      // hand out a credential; a lock must discard it along with the
+      // plaintext, on every path that reaches here -- the idle timer,
+      // signOut, and Session.init's re-entrancy guard alike.
+      this.pending = null;
     };
   }
 
@@ -150,6 +165,49 @@ export class Controller {
   async unlock(pin: string): Promise<void> {
     await this.session.unlockWithPin(pin);
     await this.loadFromCache();
+    await this.redeemPending();
+  }
+
+  /** Records a badge tap made against a locked vault. */
+  recordPending(p: PendingFill): void {
+    this.pending = p;
+  }
+
+  /**
+   * Turns a tap recorded against a locked vault into a fill.
+   *
+   * Every failure is silent and total. The pending fill is consumed first, so
+   * no path can fill twice, and nothing that happened to the tab in the
+   * meantime may fail the unlock the user actually asked for -- they typed
+   * the right PIN, so their vault opens either way.
+   *
+   * `fill` is called unchanged rather than reimplemented, so every guard it
+   * already runs applies again here: isFillableOrigin, the uriMatches recheck
+   * against the tab's current URL, and the refusal for an entry with no
+   * password. This is an intent to call it, never a way around it.
+   */
+  private async redeemPending(): Promise<void> {
+    const p = this.pending;
+    this.pending = null;
+    if (p === null) return;
+
+    try {
+      const tab = await browser.tabs.get(p.tabId);
+      if (!isRedeemable(p, tab.url, Date.now())) return;
+
+      // Non-null by isRedeemable, which refuses an undefined url.
+      const url = tab.url ?? "";
+      const matches = matchItems(this.require(), url);
+      // Exactly one, or nothing. Several entries for one origin is a choice
+      // only the user can make, and the popup is already open on them.
+      const only = matches.length === 1 ? matches[0] : undefined;
+      if (only === undefined) return;
+
+      await this.fill(p.tabId, only.id);
+    } catch {
+      // A closed tab, a navigated tab, an entry fill() refuses. None of them
+      // are the unlock's problem.
+    }
   }
 
   /**
@@ -441,8 +499,21 @@ export class Controller {
     return searchItems(this.require(), query).map(summarize);
   }
 
-  async matchesFor(pageUrl: string): Promise<ItemSummary[]> {
-    return matchItems(this.require(), pageUrl).map(summarize);
+  /**
+   * What this page offers, if anything.
+   *
+   * Takes no URL: the background page reads it from the tab itself (see
+   * `resolveTabFor`), because the caller is now a content script running on
+   * pages this addon does not control.
+   *
+   * A locked vault answers "locked" rather than throwing. The content script
+   * needs that state to tell "cannot be consulted" apart from "nothing
+   * matches" — the first renders an unlock badge, the second renders nothing.
+   */
+  async matchesFor(pageUrl: string | undefined): Promise<PageMatches> {
+    if (this.session.state !== "unlocked") return { state: "locked" };
+    if (pageUrl === undefined) return { state: "unlocked", items: [] };
+    return { state: "unlocked", items: matchItems(this.require(), pageUrl).map(summarize) };
   }
 
   async totpFor(itemId: string): Promise<TotpCode> {
@@ -481,18 +552,23 @@ export class Controller {
 
     // `undecryptable === false` does not imply fillable: a login cipher can
     // legitimately have URIs and no password at all, and matchItems returns
-    // it. Injecting for one of those would grant the page the activeTab
-    // content script and then report success for a fill that left the
-    // password box empty. Refuse before anything is injected or sent.
+    // it. Sending for one of those would report success for a fill that left
+    // the password box empty. Refuse before anything is sent.
+    //
+    // It matters more now than it did when the content script was injected on
+    // demand: an entry with no password still counts as a match, so it would
+    // put a badge on the page and then do nothing when tapped.
+    //
     // A null *username* is fine — username-less entries are normal, and the
     // content script skips that field.
     if (item.password === null) {
       throw new Error("This entry has no password to fill.");
     }
 
-    // activeTab grants access to this tab only, and only because the user just
-    // acted. The script is injected now, not at page load.
-    await browser.tabs.executeScript(tabId, { file: "autofill.js" });
+    // The content script is declared in the manifest and is already present on
+    // every fillable origin, so there is nothing to inject. Injecting anyway
+    // would load a second copy into the same isolated world and register a
+    // second onMessage listener, filling twice per tap.
     await browser.tabs.sendMessage(tabId, {
       kind: "fill",
       username: item.username,

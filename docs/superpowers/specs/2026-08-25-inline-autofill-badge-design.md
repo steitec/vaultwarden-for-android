@@ -1,7 +1,8 @@
 # Inline autofill badge — Design
 
 Date: 2026-08-25
-Status: Approved for planning
+Status: Implemented on branch `feat/autofill-badge`; §8 and §12 closed by
+on-device verification on 2026-08-25
 
 **Supersedes §7.1 of `2026-08-06-vaultwarden-firefox-android-addon-design.md`**
 ("activeTab, not host permissions"). That section is the deliberate decision this
@@ -216,18 +217,26 @@ matched — is accepted and must be reported clearly rather than as a silent no-
 
 ## 8. `browserAction.openPopup()` is an enhancement, not a dependency
 
-Whether `openPopup()` works on Firefox for Android is unverified. The addon
-button lives in the menu rather than a toolbar there, and the API's user-gesture
-requirement may not survive the hop from content script to background page.
+**Verified on 2026-08-25, Firefox for Android Nightly 156.0a1: it does not
+open the popup.** Tapping a badge on a locked vault surfaces nothing; the user
+opens the addon themselves and the fill still happens after the PIN. So the
+fallback below is the real path on this platform, not the exception.
+
+The call is kept anyway. It costs one `try`/`catch`, an undefined method
+throws a TypeError the same catch absorbs, and a later Firefox that implements
+it would start saving the gesture with no further change.
 
 The design does not rest on it. When it is unavailable or throws, the pending
 fill is still recorded and the badge switches to a hint to open the addon
 manually. The user opens it, enters the PIN, and the fill happens automatically
 just the same. `openPopup()` saves one gesture and carries nothing.
 
-**This must be probed on hardware before the pending-fill work begins**, since a
-working `openPopup()` changes only which branch is the common one, and the probe
-is cheap — a device is already attached and running the addon.
+The probe planned for before the pending-fill work could not be run as
+written: it needed a desktop `about:debugging` console, which the agent doing
+the work has no way to drive. Instrumenting the extension and reading `adb
+logcat` does not substitute — Gecko does not forward extension console output
+to logcat. The question was answered where §9's other open questions were, by
+walking the flow on the device.
 
 ## 9. Security model: what changes, what holds
 
@@ -306,9 +315,41 @@ fill, the locked flow end to end, and the `openPopup()` probe from §8.
 - **Badge fights the page's own layout** in fields with custom decoration.
   Shadow DOM limits the blast radius but cannot guarantee a good position on
   every site. Accepted; the fallback is a badge that looks slightly wrong, not a
-  broken page.
+  broken page. **Checked on 2026-08-25** against a Tailwind login form
+  (`login.example.com`): the badge sits correctly inside the field and
+  tracks it while scrolling. One site is not a survey, but the geometry works
+  where jsdom could say nothing.
 - **Content script cost on every page load.** Detection runs once at
   `document_idle` plus debounced mutations. Should be negligible, but it is now
   on the critical path of every page the user opens on a phone, so it is worth
   measuring rather than assuming.
 - **AMO review friction** (§10). Real but ordinary for this category.
+
+
+## 13. What the on-device verification found
+
+Walked on Firefox for Android Nightly 156.0a1, 2026-08-25.
+
+Working: badge renders and is correctly placed on an https login form and
+tracks the field while scrolling; one tap fills username and password without
+submitting the form; no badge on a page with no login form; the locked-vault
+hand-off records the tap, and the fill happens after the PIN with no second
+tap; a tab navigated away between the tap and the PIN is **not** filled, which
+is §6's origin check doing its job outside the test suite for the first time.
+
+Not working: `openPopup()` — see §8.
+
+One bug was found that no unit test could have caught, and it is worth
+recording because the shape recurs. The content script's module-scope entry
+point sat above the `let` it touches, so the call landed in the temporal dead
+zone; `void` swallowed the ReferenceError and the feature failed completely
+and silently. 571 tests were green throughout, because every one of them calls
+`refreshBadge()` by hand after evaluation has finished. Module-scope side
+effects are the part a test importing the module cannot exercise by importing
+it.
+
+A second, unrelated fact cost more time than the bug: `web-ext run` on Android
+prints "The extension will reload if any source file changes" and then does
+not reload. It rebuilds the XPI locally and never reinstalls it. Every probe
+sent to the device before this was understood measured the previous build.
+`adb pull` of the installed XPI is what settles what is actually running.

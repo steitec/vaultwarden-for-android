@@ -17,9 +17,14 @@ let registeredListener:
   | ((msg: unknown, sender: { id?: string }) => unknown)
   | undefined;
 
+// refreshBadge talks to the background page through runtime.sendMessage.
+// Each test sets what that answers.
+const sendMessage = vi.fn();
+
 vi.stubGlobal("browser", {
   runtime: {
     id: THIS_EXTENSION_ID,
+    sendMessage,
     onMessage: {
       addListener: (fn: (msg: unknown, sender: { id?: string }) => unknown) => {
         registeredListener = fn;
@@ -28,7 +33,18 @@ vi.stubGlobal("browser", {
   },
 });
 
-const { findLoginFields, fillFields } = await import("../../src/content/autofill");
+const { findLoginFields, fillFields, refreshBadge, startObserving, stopPageWatch } =
+  await import("../../src/content/autofill");
+
+// Importing the module installs a document watch, exactly as it does in a
+// real page. Every test below drives refreshBadge or its own observer
+// explicitly, so the module's own one is stopped here rather than left to
+// fire into whichever test happens to mutate the DOM.
+stopPageWatch();
+
+/** Comfortably past the observer's internal debounce. */
+const REFRESH_DEBOUNCE = 400;
+const { BADGE_HOST_ATTR } = await import("../../src/content/badge");
 
 function setBody(html: string) {
   document.body.innerHTML = html;
@@ -502,5 +518,313 @@ describe("onMessage listener (sender verification)", () => {
     );
     expect(result).toEqual({ filledUsername: true, filledPassword: true });
     expect(document.querySelector<HTMLInputElement>('[name="u"]')!.value).toBe("octocat");
+  });
+});
+
+describe("refreshBadge", () => {
+  function badge(): HTMLElement | null {
+    const el = document.querySelector(`[${BADGE_HOST_ATTR}]`);
+    return el instanceof HTMLElement ? el : null;
+  }
+
+  function tapBadge(): void {
+    badge()?.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
+  }
+
+  beforeEach(() => {
+    sendMessage.mockReset();
+    setBody("");
+  });
+
+  it("renders nothing on a page with no password field", async () => {
+    setBody(`<input type="text" name="q">`);
+    sendMessage.mockResolvedValue({ state: "unlocked", items: [] });
+
+    await refreshBadge(document);
+
+    expect(badge()).toBeNull();
+    // Not merely "no badge": a page with no login form must not cause the
+    // background page to be asked about it at all. Otherwise every page the
+    // user opens becomes a message.
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("renders nothing when the vault is unlocked and nothing matches", async () => {
+    setBody(`<input type="password">`);
+    sendMessage.mockResolvedValue({ state: "unlocked", items: [] });
+
+    await refreshBadge(document);
+
+    expect(badge()).toBeNull();
+  });
+
+  it("renders a fill badge for exactly one match", async () => {
+    setBody(`<input type="password">`);
+    sendMessage.mockResolvedValue({ state: "unlocked", items: [{ id: "a", name: "Router" }] });
+
+    await refreshBadge(document);
+
+    expect(badge()?.getAttribute(BADGE_HOST_ATTR)).toBe("fill");
+  });
+
+  it("renders a chooser badge for several matches", async () => {
+    setBody(`<input type="password">`);
+    sendMessage.mockResolvedValue({
+      state: "unlocked",
+      items: [
+        { id: "a", name: "One" },
+        { id: "b", name: "Two" },
+      ],
+    });
+
+    await refreshBadge(document);
+
+    expect(badge()?.getAttribute(BADGE_HOST_ATTR)).toBe("chooser");
+  });
+
+  it("renders an unlock badge when locked, without knowing whether anything matches", async () => {
+    setBody(`<input type="password">`);
+    sendMessage.mockResolvedValue({ state: "locked" });
+
+    await refreshBadge(document);
+
+    expect(badge()?.getAttribute(BADGE_HOST_ATTR)).toBe("unlock");
+  });
+
+  it("asks the background page to fill when a single-match badge is tapped", async () => {
+    setBody(`<input type="password">`);
+    sendMessage.mockResolvedValue({ state: "unlocked", items: [{ id: "a", name: "Router" }] });
+    await refreshBadge(document);
+    sendMessage.mockClear();
+
+    tapBadge();
+
+    expect(sendMessage).toHaveBeenCalledWith({ kind: "fillFromPage", itemId: "a" });
+  });
+
+  it("hands off to the popup when several entries match", async () => {
+    // Nothing on the page can choose between two entries for one domain.
+    setBody(`<input type="password">`);
+    sendMessage.mockResolvedValue({
+      state: "unlocked",
+      items: [
+        { id: "a", name: "One" },
+        { id: "b", name: "Two" },
+      ],
+    });
+    await refreshBadge(document);
+    sendMessage.mockClear();
+
+    tapBadge();
+
+    expect(sendMessage).toHaveBeenCalledWith({ kind: "handOff" });
+  });
+
+  it("hands off to the popup when the vault is locked", async () => {
+    setBody(`<input type="password">`);
+    sendMessage.mockResolvedValue({ state: "locked" });
+    await refreshBadge(document);
+    sendMessage.mockClear();
+
+    tapBadge();
+
+    expect(sendMessage).toHaveBeenCalledWith({ kind: "handOff" });
+  });
+
+  it("never sends a credential-bearing message from the page", async () => {
+    // The content script's whole security story is that it holds nothing.
+    // What it may send is an item id and a request to hand off, never a
+    // password, and never an id it was not given by the background page.
+    setBody(`<input type="password">`);
+    sendMessage.mockResolvedValue({ state: "unlocked", items: [{ id: "a", name: "Router" }] });
+    await refreshBadge(document);
+    tapBadge();
+
+    for (const [msg] of sendMessage.mock.calls) {
+      expect(JSON.stringify(msg)).not.toMatch(/password/i);
+    }
+  });
+
+  it("replaces a previous badge rather than stacking a second one", async () => {
+    setBody(`<input type="password">`);
+    sendMessage.mockResolvedValue({ state: "unlocked", items: [{ id: "a", name: "Router" }] });
+
+    await refreshBadge(document);
+    await refreshBadge(document);
+
+    expect(document.querySelectorAll(`[${BADGE_HOST_ATTR}]`)).toHaveLength(1);
+  });
+
+  it("removes the badge when the page stops offering a password field", async () => {
+    setBody(`<input type="password">`);
+    sendMessage.mockResolvedValue({ state: "unlocked", items: [{ id: "a", name: "Router" }] });
+    await refreshBadge(document);
+    expect(badge()).not.toBeNull();
+
+    setBody(`<p>signed in</p>`);
+    await refreshBadge(document);
+
+    expect(badge()).toBeNull();
+  });
+
+  it("renders nothing when the background page rejects", async () => {
+    // A locked-out or mid-restart background page must leave the page alone
+    // rather than throwing out of a content script on somebody's site.
+    setBody(`<input type="password">`);
+    sendMessage.mockRejectedValue(new Error("Vault is locked"));
+
+    await expect(refreshBadge(document)).resolves.toBeUndefined();
+
+    expect(badge()).toBeNull();
+  });
+
+  it("does not throw out of the page when a fill is refused", async () => {
+    setBody(`<input type="password">`);
+    sendMessage.mockResolvedValue({ state: "unlocked", items: [{ id: "a", name: "Router" }] });
+    await refreshBadge(document);
+    sendMessage.mockRejectedValue(new Error("Refusing to fill on an insecure page."));
+
+    expect(() => tapBadge()).not.toThrow();
+  });
+});
+
+describe("the module-scope lookup", () => {
+  it("looks for a login form as soon as the module is evaluated", async () => {
+    // The declared content script's only entry point is the call at module
+    // scope. It runs while the rest of the module body is still being
+    // evaluated, so anything it touches that is declared with let/const
+    // BELOW it sits in the temporal dead zone -- and the resulting
+    // ReferenceError is swallowed by the `void`, leaving no badge, no error
+    // and no clue.
+    //
+    // Every other test in this file calls refreshBadge() by hand, long after
+    // evaluation has finished and the dead zone is over. That is why this is
+    // the one path they cannot cover, and it is the path that shipped broken.
+    vi.resetModules();
+    document.body.innerHTML = `<input type="password">`;
+    sendMessage.mockReset();
+    sendMessage.mockResolvedValue({ state: "unlocked", items: [] });
+
+    const fresh = await import("../../src/content/autofill");
+
+    await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledWith({ kind: "matches" }));
+
+    // This evaluation installed its own document watch. Leaving it running
+    // would have it fire into every test that runs after this one.
+    fresh.stopPageWatch();
+  });
+});
+
+describe("startObserving", () => {
+  function badge(): HTMLElement | null {
+    const el = document.querySelector(`[${BADGE_HOST_ATTR}]`);
+    return el instanceof HTMLElement ? el : null;
+  }
+
+  let stopCurrent: (() => void) | null = null;
+
+  function observe(): void {
+    stopCurrent = startObserving(document);
+  }
+
+  beforeEach(() => {
+    sendMessage.mockReset();
+    setBody("");
+  });
+
+  afterEach(() => {
+    // Registered here rather than at the end of each test: a test that fails
+    // before its own stop() would otherwise leak a live observer into every
+    // test after it, and the resulting failures point everywhere but here.
+    stopCurrent?.();
+    stopCurrent = null;
+    vi.useRealTimers();
+  });
+
+  it("renders a badge for a form that mounts after the page settled", async () => {
+    // The case a one-shot lookup at document_idle misses entirely: a
+    // single-page app that renders its login form later.
+    vi.useFakeTimers();
+    sendMessage.mockResolvedValue({ state: "unlocked", items: [{ id: "a", name: "Router" }] });
+    observe();
+
+    setBody(`<input type="password">`);
+    await vi.advanceTimersByTimeAsync(REFRESH_DEBOUNCE);
+
+    expect(badge()).not.toBeNull();
+  });
+
+  it("coalesces mutations arriving in separate batches into one lookup", async () => {
+    // A framework render mutates the DOM repeatedly as it works. One
+    // background message per batch would be a message storm on every page the
+    // user opens, on a phone.
+    //
+    // The awaits are the whole point: a MutationObserver already coalesces
+    // everything done in ONE microtask into a single callback, so a loop
+    // without them proves nothing about this debounce -- it passes just as
+    // well with the debounce removed. Yielding between mutations is what
+    // makes the observer fire repeatedly and puts the timer reset under test.
+    vi.useFakeTimers();
+    setBody(`<input type="password">`);
+    sendMessage.mockResolvedValue({ state: "unlocked", items: [] });
+    observe();
+
+    for (let i = 0; i < 5; i++) {
+      document.body.appendChild(document.createElement("div"));
+      await Promise.resolve();
+    }
+    await vi.advanceTimersByTimeAsync(REFRESH_DEBOUNCE);
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not react to the badge it mounted itself", async () => {
+    // refreshBadge appends the badge host, which is itself a mutation.
+    // Reacting to it would schedule another lookup after every render,
+    // forever.
+    vi.useFakeTimers();
+    setBody(`<input type="password">`);
+    sendMessage.mockResolvedValue({ state: "unlocked", items: [{ id: "a", name: "Router" }] });
+    observe();
+
+    document.body.appendChild(document.createElement("div"));
+    await vi.advanceTimersByTimeAsync(REFRESH_DEBOUNCE);
+    const afterFirst = sendMessage.mock.calls.length;
+
+    await vi.advanceTimersByTimeAsync(REFRESH_DEBOUNCE * 4);
+
+    expect(sendMessage.mock.calls.length).toBe(afterFirst);
+  });
+
+  it("stops looking once disconnected", async () => {
+    vi.useFakeTimers();
+    sendMessage.mockResolvedValue({ state: "unlocked", items: [] });
+    observe();
+    stopCurrent?.();
+
+    setBody(`<input type="password">`);
+    await vi.advanceTimersByTimeAsync(REFRESH_DEBOUNCE * 4);
+
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("drops a lookup that was still pending when it was stopped", async () => {
+    // disconnect() discards records the observer has not delivered yet, but
+    // it does nothing about a timer that has already been scheduled -- that
+    // has to be cleared alongside it.
+    //
+    // The await is load-bearing: without it the observer callback has not run
+    // by the time stop() is called, there is no timer yet, and the test
+    // passes for a reason that has nothing to do with what it claims.
+    vi.useFakeTimers();
+    sendMessage.mockResolvedValue({ state: "unlocked", items: [] });
+    observe();
+
+    setBody(`<input type="password">`);
+    await Promise.resolve();
+    stopCurrent?.();
+    await vi.advanceTimersByTimeAsync(REFRESH_DEBOUNCE * 4);
+
+    expect(sendMessage).not.toHaveBeenCalled();
   });
 });
