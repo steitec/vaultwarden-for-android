@@ -138,33 +138,52 @@ Include this text:
 > server's ciphertext. Nothing is stored in plaintext that the server did not
 > already send in plaintext.
 >
-> `activeTab` does two things, both driven by a user action on the popup: it
-> lets the popup read the current tab's URL so that entries matching the open
-> page can be listed first, and it lets the extension inject the fill script into
-> that one tab when the user taps an entry.
+> **Page access.** The manifest requests `https://*/*`, `http://localhost/*`
+> and `http://127.0.0.1/*`, and registers one content script on exactly those
+> origins. This is the ordinary shape for a password manager: the affordance
+> has to appear in the page's password field before the user has touched the
+> extension, and nothing can be drawn on a page the extension cannot reach.
+> `<all_urls>` is deliberately not requested — it would cover `ftp:`, `file:`
+> and every other scheme, none of which this extension fills into. The two
+> plain-http patterns are the loopback hosts only; every other http page is
+> refused a fill, so no badge is offered there either.
 >
-> **Host access.** The manifest declares `optional_permissions:
-> ["https://*/*"]`. Manifest V2 has no way to express a runtime-determined
-> origin — the server address is typed by the user during setup and is not known
-> when the manifest is written — so a pattern has to be named statically. The
-> broad pattern is never requested. The popup calls
+> **The content script holds no credentials.** `autofill.js` runs at
+> `document_idle`, looks for a visible password field, and — only if it finds
+> one — asks the background page whether anything matches. The answer it
+> receives is a list of entry ids and display names with no password field in
+> it; the type that crosses that boundary (`ItemSummary`) has never had one. It
+> then draws a small badge in a closed shadow root. It learns a credential only
+> when the user taps that badge, and only as a message addressed to its own tab.
+> A page with no login form produces no message at all, so ordinary browsing is
+> never reported to the background page.
+>
+> **Every fill is validated in the background page, not on the page.** The
+> destination URL is read from the tab itself rather than taken from the
+> message — the content script does not get to name the origin it is filling
+> into. The extension then refuses any page that is not https (loopback http
+> excepted) and refuses to fill unless the chosen entry's own stored URIs match
+> that page. `all_frames` is left off, so the script does not run in
+> third-party iframes.
+>
+> **Tapping the badge on a locked vault** records an intent — tab id, origin,
+> timestamp, in memory only, never persisted — and opens the unlock screen.
+> When the vault unlocks, the tab's URL is read *again* and its origin compared
+> with the recorded one before anything is filled; a tab that navigated in the
+> meantime, or a tap older than two minutes, is discarded rather than guessed
+> at. The fill then runs through the same validation described above.
+>
+> **Server access.** The manifest also declares `optional_permissions:
+> ["https://*/*"]` for the user's own server. Manifest V2 has no way to express
+> a runtime-determined origin — the server address is typed during setup and is
+> not known when the manifest is written — so a pattern has to be named
+> statically. The broad pattern is never requested. The popup calls
 > `permissions.request({ origins: ["https://<the entered host>/*"] })` for that
 > single host, from inside the sign-in button's own event handler, and the
 > background page independently verifies the same single-host grant with
-> `permissions.contains()` before it makes any network call. The extension
-> therefore holds exactly one host permission: the server the user configured.
-> The port is deliberately omitted from the pattern because Firefox match
-> patterns have no port component (bugzilla 1362809); a portless host pattern is
-> the only form Firefox accepts.
->
-> **Content scripts.** There are none registered in the manifest — there is no
-> `content_scripts` key. `autofill.js` is injected with `tabs.executeScript`
-> only after the user taps an entry in the popup, and only into the tab they are
-> looking at. Before injecting, the extension re-reads the destination URL from
-> the tab itself rather than trusting anything passed in the message, refuses any
-> page that is not https (loopback http excepted), and refuses to fill unless the
-> chosen vault entry's own stored URIs match that page. The credential is then
-> sent in a message addressed to that one tab.
+> `permissions.contains()` before it makes any network call. The port is
+> deliberately omitted because Firefox match patterns have no port component
+> (bugzilla 1362809); a portless host pattern is the only form Firefox accepts.
 >
 > **Cryptography** uses WebCrypto throughout: PBKDF2-HMAC-SHA256 and SHA-256 for
 > the account key derivation, HKDF-Expand (implemented over WebCrypto HMAC-SHA256,
