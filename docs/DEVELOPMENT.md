@@ -78,14 +78,25 @@ development uses Firefox Nightly.
 1. Install Firefox Nightly on the phone from Google Play.
 2. In Nightly: Settings → About Firefox → tap the logo five times to enable the
    developer menu. Then Settings → Remote debugging via USB → on.
-3. Connect the phone by USB and confirm the debugging prompt on the phone.
-4. Verify adb sees it:
+3. On the phone, in the **Android** settings: Developer options → USB debugging
+   → on. This is a separate switch from Nightly's own, and both are required.
+4. Connect the phone by USB and accept the "Allow USB debugging?" prompt.
+5. Verify adb sees it:
 
    ```bash
    adb devices
    ```
 
-5. Build and run:
+   `adb` ships with Android Studio at
+   `~/Android/Sdk/platform-tools/adb` and is often not on `PATH`; `web-ext`
+   shells out to it and will fail with "adb: command not found" if it is
+   missing. Either add that directory to `PATH` or pass `--adb-bin=<path>`.
+
+   A device listed as **`unauthorized`** rather than `device` means the prompt
+   in step 4 was never accepted. Toggling USB debugging off and on again
+   re-issues it.
+
+6. Build and run:
 
    ```bash
    npm run build
@@ -94,6 +105,24 @@ development uses Firefox Nightly.
 
 `web-ext` installs the extension into Nightly's main profile and reloads it on
 rebuild.
+
+**On the two Firefox packages.** A phone with both Nightly and release Firefox
+installed makes `web-ext` stop and ask which to use. The mapping is not
+guessable, so:
+
+| Package | Channel | Sideloading |
+| --- | --- | --- |
+| `org.mozilla.fenix` | Nightly (version ends `a1`) | yes |
+| `org.mozilla.firefox` | Release | **no** |
+
+"Fenix" was the codename for the rewritten Firefox for Android; Nightly kept it
+as its package id while release took `org.mozilla.firefox`. So the id that looks
+like an old codename is the current Nightly. `--firefox-apk=org.mozilla.fenix`
+is baked into the `start:android` script for that reason. Confirm with:
+
+```bash
+adb shell dumpsys package org.mozilla.fenix | grep -m1 versionName
+```
 
 ## Debugging
 

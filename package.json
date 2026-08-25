@@ -10,7 +10,7 @@
     "test:watch": "vitest",
     "test:integration": "docker compose -f tests/integration/docker-compose.yml down -v && docker compose -f tests/integration/docker-compose.yml up -d && { vitest run -c vitest.integration.config.ts; code=$?; docker compose -f tests/integration/docker-compose.yml down -v; exit $code; }",
     "lint:ext": "web-ext lint -s dist",
-    "start:android": "web-ext run -t firefox-android -s dist"
+    "start:android": "web-ext run -t firefox-android -s dist --firefox-apk=org.mozilla.fenix"
   },
   "devDependencies": {
     "@types/firefox-webext-browser": "^120.0.0",
