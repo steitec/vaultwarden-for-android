@@ -239,11 +239,6 @@ browser.runtime.onMessage.addListener((msg: unknown, sender: browser.runtime.Mes
   return Promise.resolve(fillFields(document, { username: msg.username, password: msg.password }));
 });
 
-// Declared in the manifest at document_idle, so this runs on every fillable
-// origin the moment the page settles. It is fire-and-forget on purpose: a
-// content script has nobody to report to, and refreshBadge swallows its own
-// failures rather than surfacing them onto someone else's page.
-void refreshBadge(document);
 
 let unmountBadge: (() => void) | null = null;
 
@@ -309,3 +304,18 @@ async function onTap(mode: BadgeMode, itemId: string | null): Promise<void> {
     // to do on the page: the background page owns the user-facing report.
   }
 }
+
+// The content script's entry point.
+//
+// This MUST stay at the very bottom of the module. `refreshBadge` is a
+// hoisted function declaration, so calling it from higher up compiles and
+// looks fine -- but its first statement touches `unmountBadge`, a `let`
+// declared above, and from anywhere before that declaration the call lands
+// in the temporal dead zone. The ReferenceError is then swallowed by the
+// `void` below, and the failure mode is a badge that silently never appears.
+// That shipped once; `tests/content/autofill.test.ts` pins it now.
+//
+// Fire-and-forget is deliberate beyond that: a content script has nobody to
+// report to, and refreshBadge already swallows its own failures rather than
+// surfacing this addon's errors onto somebody else's page.
+void refreshBadge(document);
