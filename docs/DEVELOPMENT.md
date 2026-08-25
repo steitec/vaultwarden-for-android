@@ -103,8 +103,26 @@ development uses Firefox Nightly.
    npm run start:android -- --android-device=<serial from adb devices>
    ```
 
-`web-ext` installs the extension into Nightly's main profile and reloads it on
-rebuild.
+`web-ext` installs the extension into Nightly's main profile.
+
+**It does not reload on Android.** It prints "The extension will reload if any
+source file changes", and on a rebuild it prints "Building web extension from
+…" — but the device keeps running the build it was given at startup. After every
+change, stop `web-ext` and start it again.
+
+This is worth being strict about, because the failure is silent: the phone shows
+old behaviour and every conclusion drawn from it is about code that is no longer
+in the tree. What is actually installed can be checked, which is the fastest way
+out of that hole:
+
+```bash
+adb pull "$(adb shell 'ls -d /data/local/tmp/web-ext-artifacts-*' | tr -d '\r' | tail -1)/vaultwarden_for_android-0.1.0.xpi" /tmp/on-device.xpi
+unzip -o /tmp/on-device.xpi -d /tmp/on-device
+```
+
+Note also that Gecko does **not** forward an extension's `console.log` to
+`adb logcat`; only Fenix's own Java-side logging appears there. Reading the
+extension's console means `about:debugging` on desktop Firefox.
 
 **On the two Firefox packages.** A phone with both Nightly and release Firefox
 installed makes `web-ext` stop and ask which to use. The mapping is not
@@ -123,6 +141,35 @@ is baked into the `start:android` script for that reason. Confirm with:
 ```bash
 adb shell dumpsys package org.mozilla.fenix | grep -m1 versionName
 ```
+
+## The autofill badge
+
+`src/content/autofill.ts` is a **declared** content script, registered in the
+manifest for `https://*/*` plus the two http loopback hosts. It runs on every
+such page at `document_idle`, looks for a visible password field, and only then
+asks the background page whether anything matches. A page with no login form
+produces no message.
+
+It holds no credentials. It receives entry ids and names, draws a badge in a
+closed shadow root, and learns a password only in response to the user's tap —
+which is what makes a script on every https page an acceptable trade. The
+reasoning is in `docs/superpowers/specs/2026-08-25-inline-autofill-badge-design.md`,
+§9.
+
+Two consequences worth knowing before they surprise you:
+
+- **A locked vault shows a badge on every login page**, matching entry or not.
+  A locked vault cannot be consulted, and the alternative — an unencrypted
+  index of the vault's domains — is worse. Design §7.
+- **`http://[::1]` gets no badge.** It is a fillable origin but not an
+  expressible match pattern, so loopback-over-IPv6 keeps the popup path only.
+  Design §5.3.
+
+`browserAction.openPopup()` does not work on Firefox for Android (checked on
+Nightly 156.0a1). Tapping the badge on a locked vault therefore records the
+intent and the user opens the add-on themselves; the fill still happens after
+the PIN, with no second tap. The call is kept for a future Firefox that
+implements it.
 
 ## Debugging
 
