@@ -17,6 +17,7 @@ const THIS_EXTENSION_ID = "vaultwarden-android@steitec.net";
 let registeredListener:
   | ((msg: unknown, sender: { id?: string }) => unknown)
   | undefined;
+let registeredConnectListener: ((port: unknown) => void) | undefined;
 
 const BROWSER_STUB = {
   runtime: {
@@ -24,6 +25,13 @@ const BROWSER_STUB = {
     onMessage: {
       addListener: (fn: (msg: unknown, sender: { id?: string }) => unknown) => {
         registeredListener = fn;
+      },
+    },
+    // The entry subscribes at load time so a lock can reach an open popup
+    // (F-5). Firefox provides this to every background script.
+    onConnect: {
+      addListener: (fn: (port: unknown) => void) => {
+        registeredConnectListener = fn;
       },
     },
   },
@@ -366,6 +374,7 @@ describe("background page startup", () => {
             listener = fn;
           },
         },
+        onConnect: { addListener: () => {} },
       },
       storage: { local: { get, set: async () => {}, remove: async () => {} } },
     });
@@ -645,5 +654,41 @@ describe("handOff", () => {
     ).resolves.toBeUndefined();
 
     expect(record).not.toHaveBeenCalled();
+  });
+});
+
+describe("ports from an open popup", () => {
+  // The background tells open popups when the vault locks (F-5), which means
+  // it now accepts connections. `port.sender.id` is the whole of the check
+  // that keeps that channel to this extension's own popup, so it is pinned
+  // the same way the onMessage sender check is.
+
+  function fakePort(id: string | undefined) {
+    return {
+      sender: id === undefined ? undefined : { id },
+      onDisconnect: { addListener: vi.fn() },
+      onMessage: { addListener: vi.fn() },
+      postMessage: vi.fn(),
+    };
+  }
+
+  it("subscribes at load time", () => {
+    expect(registeredConnectListener).toBeTypeOf("function");
+  });
+
+  it("accepts this extension's own popup and ignores anything else", () => {
+    const mine = fakePort(THIS_EXTENSION_ID);
+    const theirs = fakePort("some-other-extensions-id");
+    const anonymous = fakePort(undefined);
+
+    registeredConnectListener?.(mine);
+    registeredConnectListener?.(theirs);
+    registeredConnectListener?.(anonymous);
+
+    // Only an accepted port is kept, and keeping it is what installs the
+    // disconnect handler that later drops it.
+    expect(mine.onDisconnect.addListener).toHaveBeenCalledTimes(1);
+    expect(theirs.onDisconnect.addListener).not.toHaveBeenCalled();
+    expect(anonymous.onDisconnect.addListener).not.toHaveBeenCalled();
   });
 });
