@@ -4,7 +4,7 @@ Vehicle: Firefox Nightly 156.0a1 (`org.mozilla.fenix`) on SM-N981B (`RFCN80EJ05Y
 via `web-ext run`, build from 90ee4d6.
 Baseline: 606 unit tests pass, `web-ext lint` 0 errors / 0 warnings / 0 notices.
 
-**Status: 14 of 25 passed, 1 failed (C4). Paused 2026-08-25 evening, resumed 2026-08-26.**
+**Status: 15 of 25 passed, 1 failed (C4). Paused 2026-08-25 evening, resumed 2026-08-26.**
 Resume instructions are at the bottom.
 
 Legend: `[ ]` not run · `[x]` pass · `[!]` FAIL · `[-]` skipped/blocked
@@ -30,7 +30,7 @@ Legend: `[ ]` not run · `[x]` pass · `[!]` FAIL · `[-]` skipped/blocked
       trying, the key dropped. The **warning is not**: the pad shows only "Incorrect PIN",
       never "N attempts remaining", so the user reaches the lockout with no notice at all.
       Root cause and reproduction in finding F-2.
-- [ ] C5 After the key is dropped: re-auth form, server URL and email prefilled; master password restores the vault
+- [x] C5 After the key is dropped: re-auth form, server URL and email prefilled; master password restores the vault — pass, 2026-08-26
 
 ## D. Autofill
 - [x] D1 Matching entries listed first on a known login page — pass, login.example.com
@@ -133,7 +133,7 @@ reopening it is exactly what hides the bug.
 
 ## Where this run stands
 
-14 of 25 passed, **1 failed (C4, see F-2)**, 10 remain.
+15 of 25 passed, **1 failed (C4, see F-2)**, 9 remain.
 
 The order was rearranged once, deliberately, and the reason should survive: the
 device already carried **an account from an earlier test session**, and that
@@ -143,8 +143,8 @@ queued to run on it too. Only after F does the fresh setup happen — which is t
 only way to reach A and B, since those test the first-run path itself.
 
 ```
-done:  C1 C2 C4(!) · D1 D2 D4 D6 D7a D7b D7c · E1 E2 E3
-next:  C5 → D3 → D5 → F1/F2 → [fresh setup] → B2 → A2 → A1 → B1 B3 B4 B5 → A3 → C3
+done:  C1 C2 C4(!) C5 · D1 D2 D4 D6 D7a D7b D7c · E1 E2 E3
+next:  D3 → D5 → F1/F2 → [fresh setup] → B2 → A2 → A1 → B1 B3 B4 B5 → A3 → C3
 ```
 
 The remaining items are deliberately being run on the build from 90ee4d6, the
@@ -153,27 +153,35 @@ across two builds and put every earlier result in question, so the fix waits
 until the checklist is finished — unless it turns out to need a device to verify,
 in which case it is cheaper to fix, rebuild, and re-run C4 alone.
 
-### Next action: C5, on the throwaway account
+### Next action: D3 and D5, both on the same loopback origin
 
-The PIN was dropped by C4, so the popup should now open on the **re-authentication
-form**, not the PIN pad. What has to hold:
+They were queued as separate problems and turned out to be one. Both pages are
+served from `http://127.0.0.1:8000`, so **a single throwaway vault entry with the
+URI `http://127.0.0.1:8000`** (including the port) unblocks both. Create it in
+the web vault, sync, then visit each page in turn:
 
-- the form is the setup form in `reauthenticate` mode — not a dead PIN pad
-- **server URL and email are prefilled** from the stored account
-- entering the master password restores the vault and its entries
+- `http://127.0.0.1:8000/react-login.html` — D3. Both `react state` lines must
+  read `FILLED` and the verdict must read `PASS`; then tap "Sign in" and confirm
+  the `SUBMITTED` block carries the username and a non-zero password length.
+  A `FILLED` DOM with `EMPTY` state is the failure being hunted.
+- `http://127.0.0.1:8000/decoy.html` — D5. Tap "check": `visible-user: FILLED`,
+  `visible-pass: FILLED`, `decoy-user: empty`, `decoy-pass: empty`.
 
-If a PIN pad appears instead, that is a failure of the same class as F-2 and worse:
-the screen can no longer succeed, because `pinWrapped` is gone.
+Fill each one twice if convenient — once from the popup, once from the badge —
+since they are different entry points into the same fill path.
 
 ### Blocked on preparation
 
-- **D3** needs a React-based login form whose credentials are in the vault. No
-  candidate identified yet. Without one this item cannot run, and it covers a
-  real failure mode: a naive `value =` assignment leaves a React form looking
-  filled and submitting empty.
+- **D3** is no longer blocked. Hunting for a real site whose credentials sit in
+  the vault was the slow way round; the form is now served from the development
+  machine next to the decoy page, and `docs/DEVELOPMENT.md` carries it in full
+  along with the two commands that fetch React's UMD builds. It reports React's
+  **state**, not the DOM, which is the only reading that can tell a real fill
+  from a form that looks filled and submits empty. Verified against React 18.3.1
+  in jsdom first: `setValue` moves the state, a naive assignment does not.
 - **D5** still needs a throwaway vault entry with the URI `http://127.0.0.1:8000`
   (**including the port** — for IP hosts the matcher compares host *and* port).
-  Create it in the web vault and sync.
+  Create it in the web vault and sync. The same entry serves D3.
 
   Termux is **not** required. Serve `decoy.html` (reproduced in
   `docs/DEVELOPMENT.md`) from the development machine and point the device's
