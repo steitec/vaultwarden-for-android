@@ -4,8 +4,8 @@ Vehicle: Firefox Nightly 156.0a1 (`org.mozilla.fenix`) on SM-N981B (`RFCN80EJ05Y
 via `web-ext run`, build from 90ee4d6.
 Baseline: 606 unit tests pass, `web-ext lint` 0 errors / 0 warnings / 0 notices.
 
-**Status: 20 of 25 passed, 2 failed (C3 C4), 2 blocked (A1 A2, see F-3),
-1 not applicable (A3), 0 open. The checklist is finished.
+**Status: 21 of 25 passed, 1 failed (C4), 2 blocked (A1 A2, see F-3),
+1 not applicable (A3), 0 open. C3 passed on a re-run against the F-4 fix.
 Paused 2026-08-25 evening, resumed 2026-08-26.**
 Resume instructions are at the bottom.
 
@@ -42,13 +42,17 @@ Legend: `[ ]` not run · `[x]` pass · `[!]` FAIL · `[-]` skipped/blocked
 ## C. Lock, unlock, PIN lockout
 - [x] C1 "Lock" returns to the PIN pad — pass, on the leftover account
 - [x] C2 Correct PIN restores the list — pass, twice (before and after C1)
-- [!] C3 Auto-lock after 15 minutes of no interaction
-      — **FAIL**, 2026-08-26. After more than 15 minutes without touching the popup,
-      the panel still opened on the entry list, not the PIN pad. Conditions: the
-      login.example.com login page open in Firefox, screen kept on by touching
-      it every few minutes, Firefox in the foreground. Root cause found and
-      confirmed on the device: those touches restarted the idle timer through the
-      badge's `matches` query. The timer itself is exact. See F-4.
+- [x] C3 Auto-lock after 15 minutes of no interaction
+      — **pass on the second run**, 2026-08-26, on the build carrying the F-4 fix.
+      Unlocked 17:24:23, popup closed, nothing touched; the PIN pad was there at
+      17:40. The login.example.com login page was reloaded and left open
+      during the window, so it sent the very `matches` query that broke the first
+      run — and the timer ran out anyway. That makes this the fix's confirmation
+      on hardware, not just a clean-room pass.
+      First run FAILED: the panel opened on the entry list after more than fifteen
+      minutes. The screen had been touched every few minutes to keep it awake, on
+      the login page, and each touch restarted the idle timer through the badge's
+      `matches` query. The timer itself was exact throughout. See F-4.
 - [!] C4 Wrong-PIN counting matches the table (5 tried, 6th refused + key dropped)
       — the **enforcement** is exactly right: 5 attempts tried, the 6th refused without
       trying, the key dropped. The **warning is not**: the pad shows only "Incorrect PIN",
@@ -418,6 +422,13 @@ from the user-initiated paths only, so reading matches for a badge stops countin
 as interaction. Needs a failing test first, driving `matchesFor` and asserting
 the timer is not restarted.
 
+**Fixed and verified.** `require()` now takes the intent at every call site and
+touches only for `"user"`; `matchesFor` passes `"page"`. Two tests, both watched
+failing first: one drives `matchesFor` fourteen minutes into the timeout and
+asserts the deadline did not move, the other guards against over-correcting by
+asserting the popup's own search still does move it. Confirmed on the device by
+C3's re-run at 17:40, with the login page reloaded and open throughout.
+
 **H2 was raised and dropped twice, and is still untested.** `setTimeout` does not
 survive process suspension and there is no `browser.alarms` fallback, so a phone
 in a pocket — the case the idle lock exists for — has never been measured. That
@@ -426,8 +437,8 @@ this is called finished.
 
 ## Where this run stands
 
-20 of 25 passed, **2 failed (C3 see F-4, C4 see F-2)**, **2 blocked (A1 A2, see
-F-3)**, 1 not applicable (A3), nothing open. D7 counts as one item here;
+21 of 25 passed, **1 failed (C4, see F-2)**, **2 blocked (A1 A2, see F-3)**,
+1 not applicable (A3), nothing open. D7 counts as one item here;
 its three parts are all pass. The throwaway account is gone: everything that
 needed a working vault is done, and only the first-run path remains.
 
@@ -438,8 +449,8 @@ no item's outcome changed. Counts below are derived from the marks rather than
 incremented by hand:
 
 ```
-passed  (20):  C1 C2 C5 · D1 D2 D3 D4 D5 D6 D7 · E1 E2 E3 · F1 F2 · B1 B2 B3 B4 B5
-failed   (2):  C3 C4
+passed  (21):  C1 C2 C3 C5 · D1 D2 D3 D4 D5 D6 D7 · E1 E2 E3 · F1 F2 · B1 B2 B3 B4 B5
+failed   (1):  C4
 blocked  (2):  A1 A2
 n/a      (1):  A3
 open     (0):  --
