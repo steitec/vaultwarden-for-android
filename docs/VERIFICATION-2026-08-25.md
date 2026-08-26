@@ -45,8 +45,10 @@ Legend: `[ ]` not run · `[x]` pass · `[!]` FAIL · `[-]` skipped/blocked
 - [!] C3 Auto-lock after 15 minutes of no interaction
       — **FAIL**, 2026-08-26. After more than 15 minutes without touching the popup,
       the panel still opened on the entry list, not the PIN pad. Conditions: the
-      login.example.com login page open in Firefox, screen on, Firefox in the
-      foreground. Investigation in finding F-4.
+      login.example.com login page open in Firefox, screen kept on by touching
+      it every few minutes, Firefox in the foreground. Root cause found and
+      confirmed on the device: those touches restarted the idle timer through the
+      badge's `matches` query. The timer itself is exact. See F-4.
 - [!] C4 Wrong-PIN counting matches the table (5 tried, 6th refused + key dropped)
       — the **enforcement** is exactly right: 5 attempts tried, the 6th refused without
       trying, the key dropped. The **warning is not**: the pad shows only "Incorrect PIN",
@@ -370,11 +372,57 @@ It stays a real gap in its own right, because a phone in a pocket is exactly the
 case the idle lock exists for, and `setTimeout` is the wrong mechanism for it.
 `browser.alarms` is the one that survives suspension.
 
-**Status: under investigation.** No fix, and no source change — the build is still
-90ee4d6. Next discriminating steps are recorded with the finding rather than acted
-on: watch the badge on the login page for repeated unmount/remount (each
-`refreshBadge` replaces it, so a running loop shows as flicker), then re-run the
-wait with no login page open in any tab.
+**Root cause, confirmed on the device 2026-08-26.** H1 is the cause; H2 is not.
+
+The badge on the login page did not flicker, which ruled out a fast mutation
+loop. Diagnostics were then added on branch `debug/f4-idle-lock` — passive only,
+logging at events that already happen, because a polling heartbeat would keep the
+page alive and mask the measurement. Extension `console.log` does not reach
+`adb logcat` on Fenix (verified, zero hits), so each event also beacons to
+`http://127.0.0.1:8000/f4/<msg>` and the loopback server's access log is the
+record. Same tunnel as D5's decoy page; `http://127.0.0.1/*` is already a
+manifest permission.
+
+An undisturbed run, screen kept on, nothing touched:
+
+```
+16:57:20  arm delayMs=900000          armed at unlock
+   ...    fifteen minutes, not one message
+17:12:20  FIRED lateByMs=0            exact
+17:12:20  lock() state=unlocked
+```
+
+**The timer itself is correct** — it fires to the millisecond when nothing
+restarts it. The same run also caught the restart happening: 135 ms after being
+armed, a single `matches` message from the open login page produced
+`touch state=unlocked pendingTimer=true sinceArmedMs=135` and a second `arm`.
+
+What failed on the first attempt was therefore not the timer but what counts as
+interaction. During that run the screen was touched every few minutes to keep it
+from going off — on the login page, on instruction from this session that
+"ordinary browsing is harmless". It is not harmless: on a page with a password
+field, a touch that mutates the DOM reaches `refreshBadge`, and the chain to
+`touch()` runs. One such event every few minutes is enough for fifteen minutes
+never to elapse.
+
+**The defect this exposes is wider than the test.** `matchesFor` is not a user
+action. It fires from a `MutationObserver`, so a login page that mutates on its
+own — an ad rotating, a carousel, a clock, a React re-render — extends the
+vault's idle timer with nobody present at all. The idle lock can be held open
+indefinitely by a tab. `require()` calls `touch()` for every caller
+(`controller.ts:425`), and only some of its callers are user actions: `list`,
+`fill`, `fillFromPage` and `totp` are, `matchesFor` is not.
+
+**Fix direction, not yet built:** take `touch()` out of `require()` and call it
+from the user-initiated paths only, so reading matches for a badge stops counting
+as interaction. Needs a failing test first, driving `matchesFor` and asserting
+the timer is not restarted.
+
+**H2 was raised and dropped twice, and is still untested.** `setTimeout` does not
+survive process suspension and there is no `browser.alarms` fallback, so a phone
+in a pocket — the case the idle lock exists for — has never been measured. That
+is its own experiment: the same run with the screen going off. Worth doing before
+this is called finished.
 
 ## Where this run stands
 
@@ -415,29 +463,24 @@ across two builds and put every earlier result in question, so the fix waits
 until the checklist is finished — unless it turns out to need a device to verify,
 in which case it is cheaper to fix, rebuild, and re-run C4 alone.
 
-### Next action: F-4's discriminating experiment
+### Next action: fix F-4, then F-2, then re-run C3 and C4
 
-The checklist itself is finished — every one of the 25 items has an outcome. What
-is left is two defects, F-2 and F-4, and the two decisions in F-3 and below.
+The checklist is finished and F-4's root cause is confirmed. What is left is
+work, not investigation:
 
-F-4 is the live one, and it is still in investigation, not in fix. Two steps, in
-this order, neither of them a source change:
+1. **F-4** — stop `matchesFor` from extending the idle timer. Failing test first.
+2. **F-2** — the lockout warning; its regression test is already written above.
+3. **Re-run C3 and C4** on the fixed build, alone. C3 needs an undisturbed
+   fifteen minutes: nothing touched, and no login page touched either, which the
+   original run got wrong.
+4. **Measure H2 separately** — the same C3 run with the screen going off, to find
+   out whether `setTimeout` survives at all in a backgrounded Fenix. If it does
+   not, the idle lock needs `browser.alarms` and that is a bigger change than
+   either fix above.
 
-1. **Watch the badge on the login page.** Every `refreshBadge` unmounts and
-   remounts it, so a mutation loop that keeps calling `matches` shows up as the
-   badge flickering. Twenty seconds of looking either confirms ongoing mutation
-   or rules it out — far cheaper than a second fifteen-minute wait.
-
-2. **Re-run the wait with no login page open in any tab.** Screen on, Firefox in
-   the foreground, popup closed, a neutral page such as `about:blank` as the only
-   tab. If it locks, H1 is confirmed and the login tab was holding it open. If it
-   still does not lock, H1 is wrong and the next step is instrumentation rather
-   than another hypothesis.
-
-Note that the lock timeout cannot be shortened from the UI to make this cheaper.
-`store.ts:24-27` describes a settings screen that reads and changes these values;
-that screen does not exist yet, and nothing in `src/popup` touches
-`lockTimeoutMinutes`. Every attempt costs a real fifteen minutes.
+The diagnostics live on branch `debug/f4-idle-lock` and must not reach main. They
+are worth keeping until step 4 is done, since that experiment needs exactly the
+same beacon trail.
 
 ### Blocked on preparation
 
