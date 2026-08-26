@@ -124,13 +124,23 @@ describe("classic script build (regression guard for MV2 background/content scri
     // entry's real top-level work (module graph fully inlined, controller
     // constructed, listener registered) instead of an empty module.
     const addListener = vi.fn();
+    const onConnectListener = vi.fn();
     const sandbox = {
       browser: {
-        runtime: { id: "test@example", onMessage: { addListener } },
+        runtime: {
+          id: "test@example",
+          onMessage: { addListener },
+          // Added when the background began telling open popups about a lock
+          // (F-5). Firefox provides onConnect to every background script, so
+          // this is the sandbox keeping up with what the entry legitimately
+          // depends on.
+          onConnect: { addListener: onConnectListener },
+        },
         storage: { local: { get: async () => ({}), set: async () => {}, remove: async () => {} } },
       },
     };
     expect(() => vm.runInContext(source, vm.createContext(sandbox))).not.toThrow();
     expect(addListener).toHaveBeenCalledTimes(1);
+    expect(onConnectListener).toHaveBeenCalledTimes(1);
   });
 });
