@@ -101,6 +101,26 @@ submission: designed, not built". One point in it is open on purpose: the script
 hardcodes `--channel=listed`, but the route needed first is `--channel=unlisted`
 (`docs/PRIVATE-INSTALL.md`).
 
+### 2.6 Pick a licence and put it in the repository
+
+There is no `LICENSE` or `COPYING` file, and `package.json` carries no `license`
+field — only `"private": true`, which is a different thing (it stops an
+accidental `npm publish` and says nothing about the terms). Without a stated
+licence the default is "all rights reserved", which sits badly with a listed
+AMO add-on whose source archive is uploaded for review and, for a listed
+listing, shown with a licence on its page.
+
+Independent of 2.1 and of everything else in this section — it can be done at
+any point, and it is a decision rather than work.
+
+The decision worth making deliberately, since it is the same question
+monetisation ran into on 2026-08-26: a permissive licence (MIT, BSD) lets anyone
+redistribute and repackage, a copyleft one (GPL, AGPL) lets them fork but
+requires they publish their changes. Neither prevents a fork — an add-on ships
+as readable JavaScript with its source archive attached, so "nobody can take
+this" is not on the table whichever is chosen. Pick for what should happen to
+the changes, not for control.
+
 ---
 
 ## 3. Gaps in what already ships
