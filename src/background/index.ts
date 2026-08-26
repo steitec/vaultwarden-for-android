@@ -203,3 +203,34 @@ void ready.catch(() => {});
 browser.runtime.onMessage.addListener((msg: unknown, sender: browser.runtime.MessageSender) =>
   handleMessage(controller, msg, sender, ready),
 );
+
+/**
+ * The popups currently open, so a lock can reach them.
+ *
+ * An open panel is a snapshot: the idle timer runs here, and without a way
+ * back the panel goes on showing entry names and usernames after the keys are
+ * gone (F-5). A Set rather than a single port because nothing guarantees only
+ * one is ever connected, and a port that has gone away must not keep a
+ * reference to a document that is closed.
+ */
+const popups = new Set<browser.runtime.Port>();
+
+browser.runtime.onConnect.addListener((port) => {
+  // Only this extension's own popup. A port from anywhere else has no
+  // business learning when this vault locks.
+  if (port.sender?.id !== browser.runtime.id) return;
+  popups.add(port);
+  port.onDisconnect.addListener(() => popups.delete(port));
+});
+
+controller.onLocked = () => {
+  for (const port of popups) {
+    // A popup that closed between the lock and this loop throws here rather
+    // than disconnecting first. It must not stop the other ports being told.
+    try {
+      port.postMessage({ kind: "locked" });
+    } catch {
+      popups.delete(port);
+    }
+  }
+};
