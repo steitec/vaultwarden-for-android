@@ -197,7 +197,7 @@ export class Controller {
 
       // Non-null by isRedeemable, which refuses an undefined url.
       const url = tab.url ?? "";
-      const matches = matchItems(this.require(), url);
+      const matches = matchItems(this.require("user"), url);
       // Exactly one, or nothing. Several entries for one origin is a choice
       // only the user can make, and the popup is already open on them.
       const only = matches.length === 1 ? matches[0] : undefined;
@@ -420,9 +420,21 @@ export class Controller {
     await this.session.signOut();
   }
 
-  private require(): VaultItem[] {
+  /**
+   * The unlocked-vault guard, and the one place that decides whether a read
+   * counts as interaction.
+   *
+   * `intent` is not a convenience: it is the difference between a person and
+   * a page. `matchesFor` is driven by the content script's MutationObserver,
+   * so a login page that mutates on its own -- a carousel, a clock, a React
+   * re-render -- reaches this with nobody present. Extending the idle timeout
+   * for it lets an open tab hold the vault unlocked indefinitely, which is
+   * F-4 in docs/VERIFICATION-2026-08-25.md. Passing it at every call site
+   * rather than inferring it means a new caller has to state which it is.
+   */
+  private require(intent: "user" | "page"): VaultItem[] {
     if (this.session.state !== "unlocked") throw new LockedError();
-    this.session.touch();
+    if (intent === "user") this.session.touch();
     return this.items;
   }
 
@@ -496,7 +508,7 @@ export class Controller {
   }
 
   async list(query: string): Promise<ItemSummary[]> {
-    return searchItems(this.require(), query).map(summarize);
+    return searchItems(this.require("user"), query).map(summarize);
   }
 
   /**
@@ -513,17 +525,17 @@ export class Controller {
   async matchesFor(pageUrl: string | undefined): Promise<PageMatches> {
     if (this.session.state !== "unlocked") return { state: "locked" };
     if (pageUrl === undefined) return { state: "unlocked", items: [] };
-    return { state: "unlocked", items: matchItems(this.require(), pageUrl).map(summarize) };
+    return { state: "unlocked", items: matchItems(this.require("page"), pageUrl).map(summarize) };
   }
 
   async totpFor(itemId: string): Promise<TotpCode> {
-    const item = this.require().find((i) => i.id === itemId);
+    const item = this.require("user").find((i) => i.id === itemId);
     if (item?.totp == null) throw new Error("Item has no TOTP secret");
     return generateTotp(item.totp, Date.now());
   }
 
   async fill(tabId: number, itemId: string): Promise<void> {
-    const item = this.require().find((i) => i.id === itemId);
+    const item = this.require("user").find((i) => i.id === itemId);
     if (item === undefined) throw new Error("Item not found");
 
     // Read the destination from the tab itself rather than trusting a URL
