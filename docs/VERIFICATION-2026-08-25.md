@@ -4,20 +4,22 @@ Vehicle: Firefox Nightly 156.0a1 (`org.mozilla.fenix`) on SM-N981B (`RFCN80EJ05Y
 via `web-ext run`, build from 90ee4d6.
 Baseline: 606 unit tests pass, `web-ext lint` 0 errors / 0 warnings / 0 notices.
 
-**Status: 15 of 25 passed, 1 failed (C4), 9 open. Paused 2026-08-25 evening,
-resumed 2026-08-26.**
+**Status: 16 of 25 passed, 1 failed (C4), 2 blocked (A1 A2, see F-3), 6 open.
+Paused 2026-08-25 evening, resumed 2026-08-26.**
 Resume instructions are at the bottom.
 
 Legend: `[ ]` not run · `[x]` pass · `[!]` FAIL · `[-]` skipped/blocked
 
 ## A. Host permission — highest risk
-- [ ] A1 "Sign in" raises Firefox's permission prompt naming the server host; accepting continues setup
-- [ ] A2 Denying gives a readable explanation, form keeps entered values
+- [-] A1 "Sign in" raises Firefox's permission prompt naming the server host; accepting continues setup
+      — BLOCKED, unreachable on this build. See F-3.
+- [-] A2 Denying gives a readable explanation, form keeps entered values
+      — BLOCKED, unreachable on this build. See F-3.
 - [ ] A3 Server on a non-standard port (if available)
 
 ## B. Setup and sign-in
 - [ ] B1 `Controller.setup` completes end to end against the real https server
-- [ ] B2 `http://` server address refused with a "use https" message
+- [x] B2 `http://` server address refused with a "use https" message — pass, 2026-08-26
 - [ ] B3 Two-factor prompt appears / lists real providers / correct code completes
 - [ ] B4 Wrong master password reported as wrong password, not as a 2FA challenge
 - [ ] B5 Vault lists entries immediately after setup
@@ -135,9 +137,75 @@ that failed. The enforcement column was already confirmed on 2026-08-26:
 Each of those readings has to happen **without closing the popup**, since
 reopening it is exactly what hides the bug.
 
+### F-3 — The host permission prompt cannot appear; `https://*/*` is required at install
+
+Observed while starting A2 on 2026-08-26: entering the server address, email,
+master password and PIN and tapping "Sign in" went straight to the two-factor
+screen. No Firefox permission prompt appeared at any point.
+
+It cannot appear. `src/manifest.json` lists `https://*/*` in the **required**
+`permissions` array, so the grant happens at install time. `permissions.request()`
+in the popup (`src/popup/popup.ts:631`) has nothing left to ask for and resolves
+true without a prompt; `permissions.contains()` in `Controller.setup`
+(`src/background/controller.ts:269`) is always true. A1 and A2 therefore test a
+path the manifest removed — they are blocked, not failing.
+
+**Where it came from.** `dade555`, "feat: declare the content script instead of
+injecting it on demand", part of the badge branch merged in `d985900`:
+
+```diff
+- "permissions": ["storage", "activeTab"],
++ "permissions": ["storage", "https://*/*", "http://localhost/*", "http://127.0.0.1/*"],
++ "content_scripts": [{ "matches": ["https://*/*", ...], "js": ["autofill.js"], ... }]
+```
+
+A statically declared content script needs host permissions at install, so the
+change was load-bearing for the badge. What it also did, silently, was convert a
+per-host grant chosen by the user at setup into an all-https grant taken at
+install. That is a change of posture, and nothing in the tree records it as a
+decision.
+
+**What it leaves behind.**
+
+- `HostPermissionDeniedError` (`controller.ts:47`) and the denial branch in
+  `submitSetup` (`popup.ts:632-637`) are dead code.
+- `optional_permissions: ["https://*/*"]` is redundant — the same pattern is
+  already required.
+- Two comments in `src/content/autofill.ts` describe the old world: "Injected on
+  demand by the background page" and "this listener is never registered
+  statically (see manifest.json's absent content_scripts)". Both are false now.
+- **`docs/AMO-SUBMISSION.md` contradicts itself.** Its "Page access" paragraph
+  correctly says the manifest requests `https://*/*` and registers a content
+  script on it. Its "Server access" paragraph still says "The broad pattern is
+  never requested" and describes the single-host `permissions.request()` as the
+  live mechanism. A reviewer reading both sees a contradiction, and the second
+  claim is the false one.
+
+**The decision this needs.** Either:
+
+1. **Keep the required `https://*/*`.** Then A1 and A2 come off the checklist,
+   the dead code goes, the stale comments go, and the AMO text is rewritten to
+   describe one grant taken at install. Expect the listing review to ask why the
+   add-on needs every https site; the honest answer is that the badge has to be
+   present on a login page before the user has told the add-on anything.
+2. **Go back to an optional per-host grant**, registering the content script at
+   runtime with `browser.contentScripts.register()` once the host is granted.
+   MV2 in Firefox supports this. It restores A1 and A2 and keeps the narrow
+   posture the design argued for, at the cost of a badge that only ever appears
+   on the user's own server host — which is not where login forms are, so the
+   badge would effectively need the broad grant anyway to stay useful.
+
+Option 2 is not the obvious win it first looks like: the badge exists to appear
+on *other people's* login pages. That is worth deciding deliberately rather than
+inheriting from a commit that was about something else.
+
+Not a blocker for the private install. It is a blocker for the AMO text being
+accurate, and the submission notes must not go out as they stand.
+
 ## Where this run stands
 
-15 of 25 passed, **1 failed (C4, see F-2)**, 9 open. D7 counts as one item here;
+16 of 25 passed, **1 failed (C4, see F-2)**, **2 blocked (A1 A2, see F-3)**,
+6 open. D7 counts as one item here;
 its three parts are all pass. The throwaway account is gone: everything that
 needed a working vault is done, and only the first-run path remains.
 
@@ -148,9 +216,10 @@ no item's outcome changed. Counts below are derived from the marks rather than
 incremented by hand:
 
 ```
-passed (15):  C1 C2 C5 · D1 D2 D3 D4 D5 D6 D7 · E1 E2 E3 · F1 F2
-failed  (1):  C4
-open    (9):  A1 A2 A3 · B1 B2 B3 B4 B5 · C3
+passed  (16):  C1 C2 C5 · D1 D2 D3 D4 D5 D6 D7 · E1 E2 E3 · F1 F2 · B2
+failed   (1):  C4
+blocked  (2):  A1 A2
+open     (6):  A3 · B1 B3 B4 B5 · C3
 ```
 
 The order was rearranged once, deliberately, and the reason should survive: the
@@ -161,8 +230,8 @@ queued to run on it too. Only after F does the fresh setup happen — which is t
 only way to reach A and B, since those test the first-run path itself.
 
 ```
-done:  C1 C2 C4(!) C5 · D1 D2 D3 D4 D5 D6 D7 · E1 E2 E3 · F1 F2
-next:  B2 → A2 → A1 → B4 → B3/B1 → B5 → A3 → C3
+done:  C1 C2 C4(!) C5 · D1 D2 D3 D4 D5 D6 D7 · E1 E2 E3 · F1 F2 · B2
+next:  B4 → B3/B1 → B5 → A3 → C3      (A1 A2 blocked, see F-3)
 ```
 
 The remaining items are deliberately being run on the build from 90ee4d6, the
@@ -171,35 +240,29 @@ across two builds and put every earlier result in question, so the fix waits
 until the checklist is finished — unless it turns out to need a device to verify,
 in which case it is cheaper to fix, rebuild, and re-run C4 alone.
 
-### Next action: the first-run path, B2 through B5 and A
+### Next action: B4, then B3 / B1 / B5
 
-All nine remaining items live in the setup screen the sign-out just returned to.
-The written order in `docs/DEVELOPMENT.md` is B before A; running it that way
-costs a second setup, because A2 and A1 are raised *by* the sign-in attempt. The
-order below reaches every item in one pass, and the reason for each position is
-the code, not preference:
+A2 and A1 are out (F-3), and B2 is done. What remains of the first-run path:
 
-1. **B2** — type `http://…` as the server address. Refused with "Enter your
-   server address as a full https:// URL." This happens at `controller.ts:251`,
-   *before* the permission logic at 253, so it costs no prompt and no request.
-2. **A2** — correct https address, then **deny** the permission prompt. Expect a
-   readable explanation naming the origin, and **the form must keep everything
-   already typed**. Retyping a master password on a phone is the cost of getting
-   this wrong.
-3. **A1** — sign in again and **accept**. The prompt must name the server host.
-4. **B4** — now, with the permission granted, enter a **wrong master password**.
-   It must be reported as a wrong password, not as a two-factor challenge.
-   Vaultwarden answers both with HTTP 400; the only thing separating them is a
-   non-empty `TwoFactorProviders` list in the body (`src/api/types.ts:203-208`).
-   This costs nothing and cannot be tested once setup has succeeded.
-5. **B3 / B1** — correct master password. If the account has 2FA, the prompt
-   appears here: it must list the real providers, and the correct code must
-   complete. That completes B1 as well.
-6. **B5** — the vault lists entries immediately, with no extra sync step.
+1. **B4 first, before finishing the sign-in.** The two-factor screen means the
+   master password was accepted, so B4 has to be reached by closing the panel and
+   reopening it — that returns a fresh setup form — and entering a **wrong**
+   master password. It must be reported as a wrong password, not as a two-factor
+   challenge. Vaultwarden answers both with HTTP 400 and only a non-empty
+   `TwoFactorProviders` list separates them (`src/api/types.ts:203-208`).
+
+   An earlier version of this section said B4 "cannot be tested once setup has
+   succeeded". That was too strong: signing out returns the setup form, so B4 is
+   reachable at any later point. Doing it now merely avoids a second sign-out.
+
+2. **B3 / B1** — correct master password, then the two-factor screen: it must
+   list the account's real providers, and the correct code must complete the
+   sign-in. That completes B1 as well.
+
+3. **B5** — the vault lists entries immediately, with no extra sync step.
 
 Then **A3** (a server on a non-standard port, if one exists — optional) and
-**C3** (the 15-minute idle auto-lock, which can be parked next to something
-else; any touch of the panel resets the timer).
+**C3** (the 15-minute idle auto-lock).
 
 ### Blocked on preparation
 
