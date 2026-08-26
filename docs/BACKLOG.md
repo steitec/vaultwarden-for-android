@@ -59,6 +59,21 @@ safe either way — but it is a choice, not an accident, and nothing records it.
 
 ---
 
+### 1.4 An open popup keeps showing the vault after it locks (F-5)
+
+Found 2026-08-26. The idle timer fired and the background locked — both beaconed
+— while the panel on screen went on showing the entry list. Reopening it gave the
+PIN pad, so the session was genuinely locked and the panel was stale.
+
+Nothing tells the popup a lock happened: no message, no port, no listener. What
+stays readable is entry names and usernames; passwords never cross to the popup
+and filling now fails with `LockedError`, so this is the account list, not the
+secrets.
+
+It matters because it is exactly the idle-lock scenario — the panel is open,
+which is why the phone got put down in the first place. Fix direction and the
+test it needs are in `docs/VERIFICATION-2026-08-25.md` § F-5.
+
 ## 2. Before anything is submitted to AMO
 
 ### 2.1 Decide the permission posture (F-3)
