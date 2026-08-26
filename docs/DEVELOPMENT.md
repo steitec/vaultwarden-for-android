@@ -1,5 +1,9 @@
 # Development
 
+Open work is indexed in `docs/BACKLOG.md`, in the order it should be picked
+up. The detailed write-ups stay here and in `docs/VERIFICATION-2026-08-25.md`;
+the backlog only points at them.
+
 ## Prerequisites
 
 - Node.js **v22.12.0** (the version this project is developed and built on).
