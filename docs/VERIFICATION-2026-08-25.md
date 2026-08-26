@@ -512,12 +512,27 @@ feature exists for is the case where the panel is most likely still open.
 It also makes C3's own reading fragile: the checklist confirms the lock by
 opening the popup, and opening it is exactly what hides this.
 
-**Fix direction, not yet built.** A port is the natural shape: the popup calls
-`browser.runtime.connect` when it opens, the background holds it, posts on lock,
-and the popup re-routes. A port beats a broadcast `sendMessage` here because it
-does not reject with "no receiving end" when no popup is open, and it tells the
-background when the popup goes away. Needs a failing test first, driving a lock
-while a rendered popup is up and asserting the list is gone.
+**Fixed and verified.** The popup opens a port; the background keeps the ones
+that belong to it and posts on every lock, and the popup re-routes. A port rather
+than a broadcast `sendMessage`, which rejects with "no receiving end" whenever no
+popup is open — almost always — and never learns that a popup has gone away.
+`Controller.onLocked` hangs off the `session.onLock` hook, where every lock path
+already converges.
+
+Confirmed on the device 2026-08-26: unlocked at 18:21:55, popup left open and
+untouched, and the panel had changed itself to the PIN pad by 18:37. Three tests,
+all watched failing first — the panel stops showing entries, it shows the PIN pad,
+and the controller reports every lock path. A fourth pins the port's sender check,
+which is the whole of what keeps this channel to this extension's own popup.
+
+`tests/build-classic-scripts.test.ts` caught the new load-time dependency on
+`runtime.onConnect` — the background threw on load in its minimal sandbox, which
+is what that guard is for. Its sandbox now provides `onConnect`, following its own
+note about keeping up with the globals Firefox really supplies, and asserts the
+subscription happens.
+
+C3's reading is no longer fragile either: an open panel now shows the lock too,
+so the checklist no longer depends on closing the popup to see the truth.
 
 ## Where this run stands
 
