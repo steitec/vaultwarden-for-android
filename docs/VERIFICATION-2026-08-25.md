@@ -4,7 +4,7 @@ Vehicle: Firefox Nightly 156.0a1 (`org.mozilla.fenix`) on SM-N981B (`RFCN80EJ05Y
 via `web-ext run`, build from 90ee4d6.
 Baseline: 606 unit tests pass, `web-ext lint` 0 errors / 0 warnings / 0 notices.
 
-**Status: 13 of 25 passed, 1 failed (C4), 11 open. Paused 2026-08-25 evening,
+**Status: 15 of 25 passed, 1 failed (C4), 9 open. Paused 2026-08-25 evening,
 resumed 2026-08-26.**
 Resume instructions are at the bottom.
 
@@ -55,8 +55,8 @@ Legend: `[ ]` not run · `[x]` pass · `[!]` FAIL · `[-]` skipped/blocked
 - [x] E3 Failed sync shows an error banner, list stays intact — pass, offline sync kept the cache
 
 ## F. Sign out
-- [ ] F1 "Sign out" asks for confirmation
-- [ ] F2 After confirming: setup screen, not the unlock screen
+- [x] F1 "Sign out" asks for confirmation — pass, 2026-08-26
+- [x] F2 After confirming: setup screen, not the unlock screen — pass, 2026-08-26, the wipe happened
 
 Not covered by design: TOTP display, copy-to-clipboard (no UI calls them yet).
 
@@ -137,8 +137,9 @@ reopening it is exactly what hides the bug.
 
 ## Where this run stands
 
-13 of 25 passed, **1 failed (C4, see F-2)**, 11 open. D7 counts as one item here;
-its three parts are all pass.
+15 of 25 passed, **1 failed (C4, see F-2)**, 9 open. D7 counts as one item here;
+its three parts are all pass. The throwaway account is gone: everything that
+needed a working vault is done, and only the first-run path remains.
 
 That total is lower than the one this log carried on 2026-08-25, which read "14 of
 25 passed, 11 remain". Both halves of that were wrong: 15 items were open at the
@@ -147,9 +148,9 @@ no item's outcome changed. Counts below are derived from the marks rather than
 incremented by hand:
 
 ```
-passed (13):  C1 C2 C5 · D1 D2 D3 D4 D5 D6 D7 · E1 E2 E3
+passed (15):  C1 C2 C5 · D1 D2 D3 D4 D5 D6 D7 · E1 E2 E3 · F1 F2
 failed  (1):  C4
-open   (11):  A1 A2 A3 · B1 B2 B3 B4 B5 · C3 · F1 F2
+open    (9):  A1 A2 A3 · B1 B2 B3 B4 B5 · C3
 ```
 
 The order was rearranged once, deliberately, and the reason should survive: the
@@ -160,8 +161,8 @@ queued to run on it too. Only after F does the fresh setup happen — which is t
 only way to reach A and B, since those test the first-run path itself.
 
 ```
-done:  C1 C2 C4(!) C5 · D1 D2 D3 D4 D5 D6 D7 · E1 E2 E3
-next:  F1/F2 → [fresh setup] → B2 → A2 → A1 → B1 B3 B4 B5 → A3 → C3
+done:  C1 C2 C4(!) C5 · D1 D2 D3 D4 D5 D6 D7 · E1 E2 E3 · F1 F2
+next:  B2 → A2 → A1 → B4 → B3/B1 → B5 → A3 → C3
 ```
 
 The remaining items are deliberately being run on the build from 90ee4d6, the
@@ -170,22 +171,35 @@ across two builds and put every earlier result in question, so the fix waits
 until the checklist is finished — unless it turns out to need a device to verify,
 in which case it is cheaper to fix, rebuild, and re-run C4 alone.
 
-### Next action: F1 and F2, the last items on the throwaway account
+### Next action: the first-run path, B2 through B5 and A
 
-This is the point of no return for the throwaway account, and it is deliberate:
-everything that needed a working vault is now done.
+All nine remaining items live in the setup screen the sign-out just returned to.
+The written order in `docs/DEVELOPMENT.md` is B before A; running it that way
+costs a second setup, because A2 and A1 are raised *by* the sign-in attempt. The
+order below reaches every item in one pass, and the reason for each position is
+the code, not preference:
 
-- **F1** "Sign out" asks for confirmation first.
-- **F2** After confirming, reopening the panel shows the **setup** screen, not the
-  unlock screen.
+1. **B2** — type `http://…` as the server address. Refused with "Enter your
+   server address as a full https:// URL." This happens at `controller.ts:251`,
+   *before* the permission logic at 253, so it costs no prompt and no request.
+2. **A2** — correct https address, then **deny** the permission prompt. Expect a
+   readable explanation naming the origin, and **the form must keep everything
+   already typed**. Retyping a master password on a phone is the cost of getting
+   this wrong.
+3. **A1** — sign in again and **accept**. The prompt must name the server host.
+4. **B4** — now, with the permission granted, enter a **wrong master password**.
+   It must be reported as a wrong password, not as a two-factor challenge.
+   Vaultwarden answers both with HTTP 400; the only thing separating them is a
+   non-empty `TwoFactorProviders` list in the body (`src/api/types.ts:203-208`).
+   This costs nothing and cannot be tested once setup has succeeded.
+5. **B3 / B1** — correct master password. If the account has 2FA, the prompt
+   appears here: it must list the real providers, and the correct code must
+   complete. That completes B1 as well.
+6. **B5** — the vault lists entries immediately, with no extra sync step.
 
-F2 is the one that matters. Locking only zeroes the in-memory keys; sign-out is
-the only thing that removes `protectedUserKey`, `pinWrapped`,
-`wrappedRefreshToken` and the cipher cache from `browser.storage.local`. If the
-unlock screen comes back, the wipe did not happen and that material cannot be
-taken off the phone short of uninstalling.
-
-Then the fresh setup begins, which is the only way to reach A and B.
+Then **A3** (a server on a non-standard port, if one exists — optional) and
+**C3** (the 15-minute idle auto-lock, which can be parked next to something
+else; any touch of the panel resets the timer).
 
 ### Blocked on preparation
 
