@@ -162,19 +162,31 @@ eventually be somebody's bug report. Full write-ups in `docs/DEVELOPMENT.md` →
 Not work to be done — things that have already cost time, or nearly did, and
 would cost it again.
 
-- **Firefox fills the username by itself.** Observed 2026-08-26 on the
-  test login page: username prefilled, password empty, with no tap. It
-  cannot be this add-on — `fillFields` sets both fields in one pass
-  (`src/content/autofill.ts:184-203`), an entry with no password is refused
-  before that, and filling happens only on an explicit `fill` message
-  (`autofill.ts:239`). It is Firefox's own form autofill, or the site.
+- **A `web-ext` restart brings back form values the add-on typed earlier.**
+  Established 2026-08-26 by reproduction, after a first guess that was wrong.
+
+  What happens: the test login page sits with empty fields, `web-ext`
+  reinstalls the extension — which restarts Fenix — and the username field
+  comes back filled. **The vault is locked throughout**, and a locked vault
+  holds no plaintext at all: every fill path goes through `require()` and
+  fails with `LockedError`. So the add-on cannot be the source, by capability
+  rather than by argument.
+
+  It is Firefox restoring form data along with the session. The value itself
+  most likely came from the add-on's own fill during D1/D2, snapshotted then
+  and replayed now — the extension seeing its own old input come back.
+
+  Note that a **manual reload does not trigger this**; only a browser restart
+  does. The first check tried — reload the page, observe an empty field —
+  therefore proved nothing, and was consistent with either explanation.
 
   The trap is in reading the checklist: D2 and D6 both assert that a tap fills
-  username *and* password. If Firefox has already put the username there, a
-  broken username fill still looks like a pass. Check both fields are empty
-  before the tap, or run the item in a private tab where Firefox's own
-  autofill does not apply. D2 and D6 were not affected — both fields were empty
-  when they were run — but nothing in the checklist says to check.
+  username *and* password. After any `web-ext` restart the username may already
+  be there, and a broken username fill still looks like a pass. Clear both
+  fields before the tap, or run the item in a private tab, where neither
+  session restore nor Firefox's own autofill applies. D2 and D6 were not
+  affected — both fields were empty when they were run — but nothing in the
+  checklist said to check.
 
 - **`web-ext` does not reload on Android**, whatever it prints. Stop it and
   start it again after any source change, or the device keeps running the old
