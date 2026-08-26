@@ -477,6 +477,48 @@ The trail also shows no message beacon before the `FIRED`, which confirms the
 popup was not opened first — opening it would have called `list`, touched the
 session and moved the deadline, and the run would have measured nothing.
 
+### F-5 — An open popup goes on showing the vault after the vault has locked
+
+Found 2026-08-26 while measuring H2, and only because the popup happened to be
+left open. The idle timer fired and `lock()` ran — both carry their own beacon,
+so this is not inferred:
+
+```
+18:05:52  FIRED lateByMs=58692
+18:05:52  lock() state=unlocked
+```
+
+The panel on screen still showed the entry list. Closing and reopening it gave
+the PIN pad, which confirms the session really was locked and the panel was
+simply stale.
+
+**Why it happens.** Nothing tells the popup. There is no `runtime.sendMessage`
+to it, no port, and no listener in `src/popup/popup.ts` — the `onLock` at
+`popup.ts:580` is the settings screen's own Lock button, not a subscription. The
+popup is a snapshot that is redrawn only when something routes it. `Session`'s
+`onLock` hook reaches the Controller, which clears `items`; the message stops
+there.
+
+**What is exposed, and what is not.** `summarize` is a whitelist
+(`controller.ts:67-78`), and it holds: passwords never cross to the popup, and a
+tap to fill now goes through `require()` and fails with `LockedError`. What
+remains readable is the **entry names and usernames** — the account list.
+
+**Why it matters more than it first looks.** This is precisely the idle-lock
+scenario. A user opens the popup, is distracted, puts the phone down; that is how
+a fifteen-minute timeout gets reached in the first place. The one case the
+feature exists for is the case where the panel is most likely still open.
+
+It also makes C3's own reading fragile: the checklist confirms the lock by
+opening the popup, and opening it is exactly what hides this.
+
+**Fix direction, not yet built.** A port is the natural shape: the popup calls
+`browser.runtime.connect` when it opens, the background holds it, posts on lock,
+and the popup re-routes. A port beats a broadcast `sendMessage` here because it
+does not reject with "no receiving end" when no popup is open, and it tells the
+background when the popup goes away. Needs a failing test first, driving a lock
+while a rendered popup is up and asserting the list is gone.
+
 ## Where this run stands
 
 22 of 25 passed, **nothing failing**, **2 blocked (A1 A2, see F-3)**,
