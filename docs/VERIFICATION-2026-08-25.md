@@ -4,8 +4,8 @@ Vehicle: Firefox Nightly 156.0a1 (`org.mozilla.fenix`) on SM-N981B (`RFCN80EJ05Y
 via `web-ext run`, build from 90ee4d6.
 Baseline: 606 unit tests pass, `web-ext lint` 0 errors / 0 warnings / 0 notices.
 
-**Status: 21 of 25 passed, 1 failed (C4), 2 blocked (A1 A2, see F-3),
-1 not applicable (A3), 0 open. C3 passed on a re-run against the F-4 fix.
+**Status: 22 of 25 passed, nothing failing, 2 blocked (A1 A2, see F-3),
+1 not applicable (A3), 0 open. C3 and C4 passed on re-runs against the fixes.
 Paused 2026-08-25 evening, resumed 2026-08-26.**
 Resume instructions are at the bottom.
 
@@ -53,11 +53,15 @@ Legend: `[ ]` not run · `[x]` pass · `[!]` FAIL · `[-]` skipped/blocked
       minutes. The screen had been touched every few minutes to keep it awake, on
       the login page, and each touch restarted the idle timer through the badge's
       `matches` query. The timer itself was exact throughout. See F-4.
-- [!] C4 Wrong-PIN counting matches the table (5 tried, 6th refused + key dropped)
-      — the **enforcement** is exactly right: 5 attempts tried, the 6th refused without
-      trying, the key dropped. The **warning is not**: the pad shows only "Incorrect PIN",
-      never "N attempts remaining", so the user reaches the lockout with no notice at all.
-      Root cause and reproduction in finding F-2.
+- [x] C4 Wrong-PIN counting matches the table (5 tried, 6th refused + key dropped)
+      — **pass on the second run**, 2026-08-26, on the build carrying the F-2 fix.
+      The middle column is now right: without the popup being closed, the pad showed
+      3, then 2, then 1 attempts remaining in order, each beside "Incorrect PIN"
+      rather than in place of it, and 0 after the fifth. The sixth submit was
+      refused without being tried and the key was dropped.
+      First run FAILED on that middle column alone: the pad showed only "Incorrect
+      PIN", five times, and the user reached the lockout with no notice. The
+      enforcement was exactly right even then. See F-2.
 - [x] C5 After the key is dropped: re-auth form, server URL and email prefilled; master password restores the vault — pass, 2026-08-26
 
 ## D. Autofill
@@ -249,6 +253,15 @@ describe("REPRO: the lockout warning during a run of wrong PINs", () => {
 });
 ```
 
+**Fixed and verified.** The count now travels with the rejection: `submitUnlock`
+already fetched fresh status to decide whether the pad had become unusable, and
+when it is still usable it throws `PinRejected` carrying `pinAttemptsRemaining`
+instead of rethrowing plainly. `renderUnlock` re-renders its warning in place
+from that number. Routing to a fresh screen would also have shown it, but would
+have discarded the error the user needs to read. The test below is committed as
+`tests/popup/lockout-warning.test.ts`, alongside a second one walking the whole
+countdown. Confirmed on the device by C4's re-run.
+
 Severity: this is the single notice standing between a user and the permanent
 loss of their PIN. Should be fixed before the private install, not after.
 
@@ -437,7 +450,7 @@ this is called finished.
 
 ## Where this run stands
 
-21 of 25 passed, **1 failed (C4, see F-2)**, **2 blocked (A1 A2, see F-3)**,
+22 of 25 passed, **nothing failing**, **2 blocked (A1 A2, see F-3)**,
 1 not applicable (A3), nothing open. D7 counts as one item here;
 its three parts are all pass. The throwaway account is gone: everything that
 needed a working vault is done, and only the first-run path remains.
@@ -449,8 +462,8 @@ no item's outcome changed. Counts below are derived from the marks rather than
 incremented by hand:
 
 ```
-passed  (21):  C1 C2 C3 C5 · D1 D2 D3 D4 D5 D6 D7 · E1 E2 E3 · F1 F2 · B1 B2 B3 B4 B5
-failed   (1):  C4
+passed  (22):  C1 C2 C3 C4 C5 · D1 D2 D3 D4 D5 D6 D7 · E1 E2 E3 · F1 F2 · B1 B2 B3 B4 B5
+failed   (0):  --
 blocked  (2):  A1 A2
 n/a      (1):  A3
 open     (0):  --
@@ -474,24 +487,32 @@ across two builds and put every earlier result in question, so the fix waits
 until the checklist is finished — unless it turns out to need a device to verify,
 in which case it is cheaper to fix, rebuild, and re-run C4 alone.
 
-### Next action: fix F-4, then F-2, then re-run C3 and C4
+### Next action: the run is done; what is left is decisions
 
-The checklist is finished and F-4's root cause is confirmed. What is left is
-work, not investigation:
+Every one of the 25 items has an outcome and nothing is failing. Both defects
+this run found were fixed and both fixes were confirmed on the device, not only
+in the suite:
 
-1. **F-4** — stop `matchesFor` from extending the idle timer. Failing test first.
-2. **F-2** — the lockout warning; its regression test is already written above.
-3. **Re-run C3 and C4** on the fixed build, alone. C3 needs an undisturbed
-   fifteen minutes: nothing touched, and no login page touched either, which the
-   original run got wrong.
-4. **Measure H2 separately** — the same C3 run with the screen going off, to find
-   out whether `setTimeout` survives at all in a backgrounded Fenix. If it does
-   not, the idle lock needs `browser.alarms` and that is a bigger change than
-   either fix above.
+- **F-4** — `matchesFor` no longer extends the idle timer. C3 re-run passed with
+  the login page reloaded and open throughout, which is the condition that broke
+  the first run.
+- **F-2** — the PIN pad re-renders its warning after every rejected attempt. C4
+  re-run showed 3, 2, 1 in order beside "Incorrect PIN", then 0, then the refusal.
 
-The diagnostics live on branch `debug/f4-idle-lock` and must not reach main. They
-are worth keeping until step 4 is done, since that experiment needs exactly the
-same beacon trail.
+The fixes sit on `fix/f4-idle-timer` and `fix/f2-lockout-warning` (the second
+stacked on the first) and have not been merged.
+
+What remains is not verification work:
+
+1. **F-3** needs a decision — keep the required `https://*/*` or return to a
+   per-host grant. A1 and A2 stay blocked until it is answered, and
+   `docs/AMO-SUBMISSION.md` contradicts itself until it is acted on.
+2. **H2 is still unmeasured.** `setTimeout` does not survive process suspension
+   and there is no `browser.alarms` fallback, so the idle lock has never been
+   tested with the screen off — the case a phone in a pocket actually presents.
+   Every C3 run so far kept the screen on deliberately. The beacon rig on
+   `debug/f4-idle-lock` is what that experiment needs.
+3. **The rest of `docs/BACKLOG.md`**, in its own order.
 
 ### Blocked on preparation
 
