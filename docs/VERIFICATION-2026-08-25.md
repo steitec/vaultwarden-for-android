@@ -4,8 +4,8 @@ Vehicle: Firefox Nightly 156.0a1 (`org.mozilla.fenix`) on SM-N981B (`RFCN80EJ05Y
 via `web-ext run`, build from 90ee4d6.
 Baseline: 606 unit tests pass, `web-ext lint` 0 errors / 0 warnings / 0 notices.
 
-**Status: 20 of 25 passed, 1 failed (C4), 2 blocked (A1 A2, see F-3),
-1 not applicable (A3), 1 open (C3).
+**Status: 20 of 25 passed, 2 failed (C3 C4), 2 blocked (A1 A2, see F-3),
+1 not applicable (A3), 0 open. The checklist is finished.
 Paused 2026-08-25 evening, resumed 2026-08-26.**
 Resume instructions are at the bottom.
 
@@ -42,7 +42,11 @@ Legend: `[ ]` not run · `[x]` pass · `[!]` FAIL · `[-]` skipped/blocked
 ## C. Lock, unlock, PIN lockout
 - [x] C1 "Lock" returns to the PIN pad — pass, on the leftover account
 - [x] C2 Correct PIN restores the list — pass, twice (before and after C1)
-- [ ] C3 Auto-lock after 15 minutes of no interaction
+- [!] C3 Auto-lock after 15 minutes of no interaction
+      — **FAIL**, 2026-08-26. After more than 15 minutes without touching the popup,
+      the panel still opened on the entry list, not the PIN pad. Conditions: the
+      login.example.com login page open in Firefox, screen on, Firefox in the
+      foreground. Investigation in finding F-4.
 - [!] C4 Wrong-PIN counting matches the table (5 tried, 6th refused + key dropped)
       — the **enforcement** is exactly right: 5 attempts tried, the 6th refused without
       trying, the key dropped. The **warning is not**: the pad shows only "Incorrect PIN",
@@ -321,10 +325,61 @@ inheriting from a commit that was about something else.
 Not a blocker for the private install. It is a blocker for the AMO text being
 accurate, and the submission notes must not go out as they stand.
 
+### F-4 — The 15-minute idle auto-lock did not happen (C3's failure)
+
+Observed 2026-08-26: the vault was left alone for more than fifteen minutes with
+the popup closed, and still opened on the entry list. Screen on, Firefox in the
+foreground, the login.example.com login page open in a tab.
+
+**What the observation already establishes.** The background page was never
+reloaded. The user key lives only in memory, so a reload would have produced the
+PIN pad. The process survived and the timer either never expired or was restarted.
+
+**There is exactly one timer in the add-on.** `Session.touch()` installs a plain
+`setTimeout` (`src/session/session.ts:215`) and `touch()` is called from only two
+places: `Session.unlockWithPin` and `Controller.require()`
+(`src/background/controller.ts:425`). There is no `browser.alarms` anywhere, and
+the manifest requests no `alarms` permission.
+
+**H1 — a background tab restarts the timer with no user involvement.** The chain
+is unbroken in the source:
+
+- `startObserving` installs a `MutationObserver` on `documentElement` with
+  `subtree: true` (`src/content/autofill.ts:351`) — any node added or removed
+  anywhere on the page.
+- After a 300 ms debounce it calls `refreshBadge` (`autofill.ts:345-348`).
+- `refreshBadge` sends `{kind:"matches"}`, but only when the page has a visible
+  password field (`autofill.ts:257-262`). Ordinary browsing is protected; a login
+  page is not.
+- `Controller.matchesFor` calls `require()` (`controller.ts:516`), and `require()`
+  calls `session.touch()` (`controller.ts:425`) — the idle timer restarts.
+
+So while any tab holds a login page whose DOM keeps changing — a carousel, a
+spinner, a clock, a React re-render, an ad — the idle lock can never expire, and
+the user does nothing to cause it. For a password manager that is severe: the
+lock is defeated by a tab sitting in the background.
+
+H1 requires ongoing mutation. A genuinely static login page triggers the observer
+once, at load, and the timer would then run out normally. Whether
+login.example.com mutates is the open question.
+
+**H2 — the process was frozen and the timer never advanced.** `setTimeout` only
+counts while the process runs, and nothing here survives suspension. Largely ruled
+out for this observation: the screen was on and Firefox was in the foreground.
+It stays a real gap in its own right, because a phone in a pocket is exactly the
+case the idle lock exists for, and `setTimeout` is the wrong mechanism for it.
+`browser.alarms` is the one that survives suspension.
+
+**Status: under investigation.** No fix, and no source change — the build is still
+90ee4d6. Next discriminating steps are recorded with the finding rather than acted
+on: watch the badge on the login page for repeated unmount/remount (each
+`refreshBadge` replaces it, so a running loop shows as flicker), then re-run the
+wait with no login page open in any tab.
+
 ## Where this run stands
 
-20 of 25 passed, **1 failed (C4, see F-2)**, **2 blocked (A1 A2, see F-3)**,
-1 not applicable (A3), 1 open (C3). D7 counts as one item here;
+20 of 25 passed, **2 failed (C3 see F-4, C4 see F-2)**, **2 blocked (A1 A2, see
+F-3)**, 1 not applicable (A3), nothing open. D7 counts as one item here;
 its three parts are all pass. The throwaway account is gone: everything that
 needed a working vault is done, and only the first-run path remains.
 
@@ -336,10 +391,10 @@ incremented by hand:
 
 ```
 passed  (20):  C1 C2 C5 · D1 D2 D3 D4 D5 D6 D7 · E1 E2 E3 · F1 F2 · B1 B2 B3 B4 B5
-failed   (1):  C4
+failed   (2):  C3 C4
 blocked  (2):  A1 A2
 n/a      (1):  A3
-open     (1):  C3
+open     (0):  --
 ```
 
 The order was rearranged once, deliberately, and the reason should survive: the
@@ -351,7 +406,7 @@ only way to reach A and B, since those test the first-run path itself.
 
 ```
 done:  B1 B2 B3 B4 B5 · C1 C2 C4(!) C5 · D1 D2 D3 D4 D5 D6 D7 · E1 E2 E3 · F1 F2
-next:  C3                             (A1 A2 blocked see F-3, A3 not applicable)
+next:  --  the checklist is finished; F-2 and F-4 are the open defects
 ```
 
 The remaining items are deliberately being run on the build from 90ee4d6, the
@@ -360,21 +415,29 @@ across two builds and put every earlier result in question, so the fix waits
 until the checklist is finished — unless it turns out to need a device to verify,
 in which case it is cheaper to fix, rebuild, and re-run C4 alone.
 
-### Next action: C3, the last open item
+### Next action: F-4's discriminating experiment
 
-The whole first-run path is done: A1 and A2 are out (F-3), B1–B5 all pass. One
-item remains.
+The checklist itself is finished — every one of the 25 items has an outcome. What
+is left is two defects, F-2 and F-4, and the two decisions in F-3 and below.
 
-**C3** — the 15-minute idle auto-lock. The device now holds a signed-in,
-   unlocked vault, which is exactly the state C3 needs. It is a real wait with no
-   interaction: any touch of the popup resets the timer, so park it next to
-   something else and come back. Pass means the popup opens on the PIN pad.
+F-4 is the live one, and it is still in investigation, not in fix. Two steps, in
+this order, neither of them a source change:
 
-A3 is settled: there is no server on a non-standard port to point at, so it is
-recorded as not applicable rather than left open.
+1. **Watch the badge on the login page.** Every `refreshBadge` unmounts and
+   remounts it, so a mutation loop that keeps calling `matches` shows up as the
+   badge flickering. Twenty seconds of looking either confirms ongoing mutation
+   or rules it out — far cheaper than a second fifteen-minute wait.
 
-Once C3 lands, the run is finished except for C4, and the F-2 / F-3 decisions
-below are what stands between here and a submission.
+2. **Re-run the wait with no login page open in any tab.** Screen on, Firefox in
+   the foreground, popup closed, a neutral page such as `about:blank` as the only
+   tab. If it locks, H1 is confirmed and the login tab was holding it open. If it
+   still does not lock, H1 is wrong and the next step is instrumentation rather
+   than another hypothesis.
+
+Note that the lock timeout cannot be shortened from the UI to make this cheaper.
+`store.ts:24-27` describes a settings screen that reads and changes these values;
+that screen does not exist yet, and nothing in `src/popup` touches
+`lockTimeoutMinutes`. Every attempt costs a real fifteen minutes.
 
 ### Blocked on preparation
 
