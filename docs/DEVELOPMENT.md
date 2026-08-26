@@ -279,6 +279,101 @@ says what it would mean.
 - [ ] Filling works on a React-based login form (the value is set through the
       native setter and `input`/`change` are dispatched — a framework that
       ignores this leaves the form looking filled but submitting empty).
+
+  Finding a real site whose credentials are in the vault turned out to be the
+  slow way. Serve the page below instead, next to `decoy.html`, from the same
+  loopback origin — one throwaway vault entry with the URI
+  `http://127.0.0.1:8000` then covers this item and the decoy item both.
+
+  React is not vendored into this repo. Fetch the UMD builds once:
+
+  ```bash
+  npm pack react@18 react-dom@18
+  tar xzf react-18.3.1.tgz && tar xzf react-dom-18.3.1.tgz
+  cp package/umd/react.development.js react.js
+  cp package/umd/react-dom.development.js react-dom.js
+  ```
+
+  **The page reports React's state, never the DOM.** That distinction is the
+  whole test: a naive `input.value = x` updates the DOM *and* React's value
+  tracker, so the `input` event that follows looks like a no-op and state never
+  moves. The form then looks filled and submits empty. Reading the DOM back
+  would call that a pass.
+
+  ```html
+  <!doctype html>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>react login test</title>
+  <style>
+    body { font: 16px system-ui; padding: 1rem }
+    input { display: block; margin: .5rem 0 1rem; font-size: 16px; padding: .4rem; width: 100%; box-sizing: border-box }
+    pre { background: #eee; padding: .6rem; white-space: pre-wrap; word-break: break-all }
+    .verdict { font-weight: bold; font-size: 1.1rem }
+  </style>
+
+  <h1>React login</h1>
+  <div id="app"></div>
+
+  <script src="./react.js"></script>
+  <script src="./react-dom.js"></script>
+  <script>
+  // No JSX, so no build step and no Babel: createElement directly.
+  var e = React.createElement;
+
+  function Login() {
+    var u = React.useState("");
+    var p = React.useState("");
+    var submitted = React.useState(null);
+
+    return e("form", {
+      onSubmit: function (ev) {
+        ev.preventDefault();
+        // Exactly what a real site would send: the state, never the DOM.
+        submitted[1]({ username: u[0], password: p[0] });
+      }
+    },
+      e("label", { htmlFor: "username" }, "Username"),
+      e("input", {
+        id: "username", name: "username", type: "text", autoComplete: "username",
+        value: u[0], onChange: function (ev) { u[1](ev.target.value); }
+      }),
+      e("label", { htmlFor: "password" }, "Password"),
+      e("input", {
+        id: "password", name: "password", type: "password", autoComplete: "current-password",
+        value: p[0], onChange: function (ev) { p[1](ev.target.value); }
+      }),
+      e("button", { type: "submit" }, "Sign in"),
+
+      e("pre", null,
+        "react state username: " + (u[0] ? "FILLED (" + u[0] + ")" : "EMPTY") + "\n" +
+        "react state password: " + (p[0] ? "FILLED (" + p[0].length + " chars)" : "EMPTY")),
+
+      e("p", { className: "verdict" },
+        (u[0] && p[0]) ? "PASS - React observed the fill"
+                       : "not filled yet (or FAIL - see above)"),
+
+      submitted[0] === null ? null : e("pre", null,
+        "SUBMITTED:\n" +
+        "  username: " + (submitted[0].username || "(empty)") + "\n" +
+        "  password: " + (submitted[0].password ? submitted[0].password.length + " chars" : "(empty)"))
+    );
+  }
+
+  ReactDOM.createRoot(document.getElementById("app")).render(e(Login));
+  </script>
+  ```
+
+  **Pass condition:** after autofilling, both `react state` lines read `FILLED`
+  and the verdict line reads `PASS`. Then tap "Sign in": the `SUBMITTED` block
+  must carry the username and a non-zero password length. A `FILLED` DOM with
+  `EMPTY` state is the failure this item exists to catch.
+
+  Checked against React 18.3.1 in jsdom before the device run: `setValue` from
+  `src/content/autofill.ts` moves the state, and a naive assignment leaves it
+  `EMPTY` while the DOM reads back the value. So the page does discriminate.
+  jsdom is not the point of the item, though — the device run is, because it is
+  the only place the content script, the badge and the fill path meet a real
+  browser.
 - [ ] Tapping an entry whose URIs do not match the open page is refused with an
       explanation rather than silently filling.
 - [ ] **Autofill on a page carrying an off-screen decoy password field: the
