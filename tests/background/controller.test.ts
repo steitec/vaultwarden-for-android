@@ -719,6 +719,58 @@ describe("Controller", () => {
     }, 30000);
   });
 
+  describe("what counts as interaction for the idle timer", () => {
+    // F-4. The badge's `matches` query is driven by a MutationObserver, not by
+    // a person: a login page that mutates on its own -- a carousel, a clock, a
+    // React re-render -- reaches it with nobody present. Letting it restart the
+    // idle timer means an open tab can hold the vault unlocked indefinitely.
+    // Confirmed on the device 2026-08-26; see docs/VERIFICATION-2026-08-25.md.
+
+    it("does not restart the idle timer when a page asks for its matches", async () => {
+      vi.useFakeTimers();
+      try {
+        const { controller, session } = await makeController();
+        await controller.unlock(PIN);
+
+        // Fourteen minutes into the timeout the page mutates and the content
+        // script asks what matches it.
+        vi.advanceTimersByTime(14 * 60 * 1000);
+        await matchedItems(controller, "https://github.com");
+
+        // One more minute reaches the deadline the unlock set.
+        vi.advanceTimersByTime(60 * 1000 + 1000);
+
+        expect(session.state).toBe("locked");
+      } finally {
+        vi.useRealTimers();
+      }
+    }, 20000);
+
+    // The guard against over-correcting the fix above: the popup's own search
+    // is a person, and must still move the deadline.
+    it("does restart it when the user searches the vault from the popup", async () => {
+      vi.useFakeTimers();
+      try {
+        const { controller, session } = await makeController();
+        await controller.unlock(PIN);
+
+        vi.advanceTimersByTime(14 * 60 * 1000);
+        await controller.list("");
+
+        // Past the deadline the unlock set, and still unlocked: the search
+        // moved it.
+        vi.advanceTimersByTime(60 * 1000 + 1000);
+        expect(session.state).toBe("unlocked");
+
+        // A full timeout after the search, and it is gone.
+        vi.advanceTimersByTime(15 * 60 * 1000);
+        expect(session.state).toBe("locked");
+      } finally {
+        vi.useRealTimers();
+      }
+    }, 20000);
+  });
+
   describe("a lock that lands in the middle of a load", () => {
     // decryptVault is a long chain of awaits over the whole vault, and the
     // idle timer can fire anywhere inside it. By the time the decrypted

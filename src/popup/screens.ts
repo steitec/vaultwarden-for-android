@@ -1,4 +1,4 @@
-import { errorText } from "./errors";
+import { errorText, PinRejected } from "./errors";
 
 /**
  * The screens that come before the vault list: signing in, unlocking, the
@@ -267,15 +267,29 @@ export function renderUnlock(
   });
   form.append(pin.row);
 
-  if (attemptsLeft <= ATTEMPT_WARNING_THRESHOLD) {
-    const plural = attemptsLeft === 1 ? "1 attempt" : `${attemptsLeft} attempts`;
-    form.append(
-      paragraph("warn", `${plural} remaining before your master password is required.`),
-    );
-  }
-
   const err = errorSlot();
   form.append(err, button("unlock-submit", "Unlock", "submit"));
+
+  /**
+   * Renders the warning for a given count, replacing whatever is there.
+   *
+   * Evaluating it once at first paint is what made C4 fail on the device: the
+   * popup opens at five attempts, above the threshold, and a user who keeps
+   * the panel open to type — which is the normal way to type a PIN — then
+   * spends every attempt with no notice at all. Reopening the popup did show
+   * it, because the counter is persisted, which is exactly why 606 tests
+   * missed it. See F-2 in docs/VERIFICATION-2026-08-25.md.
+   */
+  let warning: HTMLElement | null = null;
+  function showWarning(left: number): void {
+    warning?.remove();
+    warning = null;
+    if (left > ATTEMPT_WARNING_THRESHOLD) return;
+    const plural = left === 1 ? "1 attempt" : `${left} attempts`;
+    warning = paragraph("warn", `${plural} remaining before your master password is required.`);
+    form.insertBefore(warning, err);
+  }
+  showWarning(attemptsLeft);
 
   form.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -292,6 +306,9 @@ export function renderUnlock(
     void onSubmit(entered)
       .catch((e: unknown) => {
         err.textContent = errorText(e);
+        // The rejection carries the fresh count, so the warning moves with it
+        // rather than staying at whatever the screen was painted with.
+        if (e instanceof PinRejected) showWarning(e.attemptsLeft);
       })
       .finally(() => {
         pin.input.value = "";
