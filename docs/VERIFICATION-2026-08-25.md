@@ -120,6 +120,110 @@ they prove the warning renders correctly *for a given count*. `main.test.ts:257`
 popup already at 2 remaining. Nothing drives the sequence, which is the only
 thing a real lockout does.
 
+The reproduction is kept here rather than in `tests/`, because committing a
+failing test would leave the suite red for as long as F-2 is unfixed. Drop it in
+as `tests/popup/lockout-warning.test.ts` when the fix is written — it is the
+regression test:
+
+```ts
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { main } from "../../src/popup/popup";
+import type { Status } from "../../src/background/messages";
+
+const SKELETON = `
+  <header id="status" class="status"></header>
+  <nav id="settings" class="settings" hidden></nav>
+  <input id="search" class="search" type="search" />
+  <p id="error" class="banner" role="alert" hidden></p>
+  <main id="root"></main>
+`;
+
+function requireEl(id: string): HTMLElement {
+  const found = document.getElementById(id);
+  if (found === null) throw new Error(`missing #${id}`);
+  return found;
+}
+
+function oneInput(scope: ParentNode, selector: string): HTMLInputElement {
+  const found = scope.querySelector(selector);
+  if (!(found instanceof HTMLInputElement)) throw new Error(`no input matching ${selector}`);
+  return found;
+}
+
+function submitForm(scope: ParentNode): void {
+  const form = scope.querySelector("form");
+  if (!(form instanceof HTMLFormElement)) throw new Error("no form to submit");
+  form.dispatchEvent(new Event("submit", { cancelable: true }));
+}
+
+function kindOf(req: unknown): string {
+  if (typeof req !== "object" || req === null) return "";
+  if (!("kind" in req) || typeof req.kind !== "string") return "";
+  return req.kind;
+}
+
+/** A background page that counts failed PIN attempts the way Session does. */
+function lockoutResponder(): (req: unknown) => unknown {
+  let failed = 0;
+  return (req: unknown) => {
+    const kind = kindOf(req);
+    if (kind === "status") {
+      const s: Status = {
+        state: "locked",
+        lastSyncMs: 1,
+        email: "a@b.com",
+        serverUrl: "https://vault.example.net",
+        pinUnlockAvailable: failed < 5,
+        pinAttemptsRemaining: Math.max(0, 5 - failed),
+      };
+      return s;
+    }
+    if (kind === "unlock") {
+      failed += 1;
+      throw new Error("Incorrect PIN");
+    }
+    throw new Error(`unexpected kind ${kind}`);
+  };
+}
+
+async function wrongPin(): Promise<void> {
+  const root = requireEl("root");
+  oneInput(root, "#unlock-pin").value = "000000";
+  submitForm(root);
+  await vi.waitFor(() => expect(root.querySelector(".error")?.textContent).toMatch(/incorrect/i));
+}
+
+beforeEach(() => {
+  document.body.innerHTML = SKELETON;
+  vi.spyOn(window, "close").mockImplementation(() => {});
+  const responder = lockoutResponder();
+  vi.stubGlobal("browser", {
+    runtime: { sendMessage: vi.fn((req: unknown) => Promise.resolve(responder(req))) },
+    tabs: { query: () => Promise.resolve([]) },
+    permissions: { request: () => Promise.resolve(true) },
+  });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+describe("REPRO: the lockout warning during a run of wrong PINs", () => {
+  it("warns once only two attempts are left", async () => {
+    await main();
+    const root = requireEl("root");
+    expect(root.textContent).not.toMatch(/attempts remaining/i);
+
+    await wrongPin(); // 4 left
+    await wrongPin(); // 3 left
+    await wrongPin(); // 2 left -- under the threshold, the warning is due
+
+    expect(root.textContent).toMatch(/2 attempts remaining/i);
+  });
+});
+```
+
 Severity: this is the single notice standing between a user and the permanent
 loss of their PIN. Should be fixed before the private install, not after.
 
@@ -297,6 +401,16 @@ Then **A3** (a server on a non-standard port, if one exists — optional) and
 
 ### How to resume
 
+Paused 2026-08-26 midway through the fresh setup, at the two-factor screen.
+**Nothing was stored:** `Controller.setup` returns the two-factor challenge
+before it writes `StoredState` (`src/background/controller.ts`, the `catch` that
+converts `TwoFactorRequiredError` sits above the `const state: StoredState`
+block), so the device holds no account. The panel will open on a fresh setup
+form.
+
+Source is unchanged since the run began — the build under test is still 90ee4d6,
+and every commit since has been documentation.
+
 ```bash
 export PATH="$HOME/Android/Sdk/platform-tools:$PATH"
 adb devices                       # expect: RFCN80EJ05Y  device  (not unauthorized)
@@ -304,12 +418,18 @@ npm run build
 npm run start:android -- --android-device=RFCN80EJ05Y
 ```
 
-The extension's `storage.local` survives a `web-ext` restart — that is how the
-earlier account was still there at the start of this run. Since C4 dropped the
-PIN, the throwaway account now waits at the **re-authentication form**, not the
-PIN pad; the master password is what gets back in.
+Only if D3 or D5 need re-running — neither is outstanding, both passed:
 
-Two things that cost time today and need not cost it again:
+```bash
+# from a directory holding decoy.html and react-login.html (both in DEVELOPMENT.md)
+npm pack react@18 react-dom@18 && tar xzf react-18.3.1.tgz && tar xzf react-dom-18.3.1.tgz
+cp package/umd/react.development.js react.js
+cp package/umd/react-dom.development.js react-dom.js
+python3 -m http.server 8000 --bind 127.0.0.1
+adb reverse tcp:8000 tcp:8000     # does not survive a device reconnect
+```
+
+Three things that cost time and need not cost it again:
 
 - **The popup is opened from the ⋮ menu by tapping the extension's own entry.**
   Settings → Extensions → the add-on leads to Fenix's management page (Enabled /
@@ -317,3 +437,16 @@ Two things that cost time today and need not cost it again:
 - **`web-ext` does not reload on Android**, whatever it prints. After any source
   change, stop it and start it again, or the device keeps running the old build
   and every conclusion drawn from it is about code that is no longer in the tree.
+- **The counts in this log were wrong once already.** Derive them from the marks
+  (`grep -c '^\s*- \[x\]'` and friends), never by incrementing the previous
+  number.
+
+### Open decisions, neither of them urgent for a private install
+
+- **F-2** (the lockout warning) is unfixed. The recommendation on the table, not
+  yet answered: finish the checklist on this build, then fix, then re-run C4
+  alone. The regression test is written and sits inside F-2 above.
+- **F-3** (the required `https://*/*`) needs a decision between keeping the broad
+  install-time grant and returning to a per-host one. Whichever way it goes,
+  `docs/AMO-SUBMISSION.md` has to stop contradicting itself before anything is
+  submitted.
