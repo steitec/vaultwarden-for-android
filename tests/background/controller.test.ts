@@ -771,6 +771,36 @@ describe("Controller", () => {
     }, 20000);
   });
 
+  describe("telling its owner about a lock", () => {
+    // F-5. The background page holds the connections to any open popup, and a
+    // panel that is not told goes on showing entry names and usernames after
+    // the keys are zeroed. Every lock path has to reach this, not just the
+    // button the user pressed.
+
+    it("fires on the idle timer, on an explicit lock, and on signOut", async () => {
+      vi.useFakeTimers();
+      try {
+        const { controller } = await makeController();
+        const locks: number[] = [];
+        controller.onLocked = () => locks.push(Date.now());
+
+        await controller.unlock(PIN);
+        vi.advanceTimersByTime(15 * 60 * 1000 + 1000);
+        expect(locks).toHaveLength(1);
+
+        await controller.unlock(PIN);
+        controller.lock();
+        expect(locks).toHaveLength(2);
+
+        await controller.unlock(PIN);
+        await controller.signOut();
+        expect(locks).toHaveLength(3);
+      } finally {
+        vi.useRealTimers();
+      }
+    }, 30000);
+  });
+
   describe("a lock that lands in the middle of a load", () => {
     // decryptVault is a long chain of awaits over the whole vault, and the
     // idle timer can fire anywhere inside it. By the time the decrypted
