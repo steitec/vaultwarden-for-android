@@ -750,6 +750,28 @@ export async function main(): Promise<void> {
     });
   }
 
+  // The vault can lock while this panel is up: the idle timer runs in the
+  // background page and knows nothing about an open popup. Without this the
+  // panel goes on showing entry names and usernames after the keys have been
+  // zeroed — which is F-5, and it is the idle-lock scenario itself, since a
+  // panel left open is how a phone gets put down in the first place.
+  //
+  // A port rather than a broadcast `sendMessage`: a broadcast rejects with
+  // "no receiving end" whenever no popup is open, which is almost always, and
+  // it never tells the background that the popup has gone away.
+  //
+  // Guarded because `connect` is not worth a blank panel: a popup that failed
+  // to subscribe is the behaviour we have today, not a worse one.
+  try {
+    const port = browser.runtime.connect({ name: "popup" });
+    port.onMessage.addListener(() => {
+      void route();
+    });
+  } catch {
+    // Nothing to report to; the panel still works, it just will not learn
+    // about a lock that happens while it is open.
+  }
+
   await route();
 }
 
