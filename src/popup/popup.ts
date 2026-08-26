@@ -5,7 +5,7 @@ import type {
   SetupResult,
   Status,
 } from "../background/messages";
-import { errorText } from "./errors";
+import { errorText, PinRejected } from "./errors";
 import {
   renderSettings,
   renderSetup,
@@ -681,6 +681,10 @@ export async function main(): Promise<void> {
         await route(after);
         return;
       }
+      // Still a usable pad. Rethrowing plainly leaves the screen showing the
+      // count it was painted with, which is the whole of F-2 — so the fresh
+      // count rides along and the pad updates its own warning.
+      if (after !== null) throw new PinRejected(errorText(e), after.pinAttemptsRemaining);
       throw e;
     }
     await route();
