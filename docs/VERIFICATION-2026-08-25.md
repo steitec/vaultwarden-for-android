@@ -442,11 +442,40 @@ asserts the deadline did not move, the other guards against over-correcting by
 asserting the popup's own search still does move it. Confirmed on the device by
 C3's re-run at 17:40, with the login page reloaded and open throughout.
 
-**H2 was raised and dropped twice, and is still untested.** `setTimeout` does not
-survive process suspension and there is no `browser.alarms` fallback, so a phone
-in a pocket — the case the idle lock exists for — has never been measured. That
-is its own experiment: the same run with the screen going off. Worth doing before
-this is called finished.
+**H2, measured 2026-08-26.** The screen-off case was finally run, and the answer
+is neither of the two that were guessed at.
+
+Conditions were chosen so the result would mean something: `adb` was moved to
+WiFi and the cable pulled, because Android is markedly more lenient with
+background processes while charging — Doze does not engage at all — so a pass on
+USB would have proved nothing about a phone in a pocket. Battery at 74%, screen
+switched off deliberately rather than left to time out, device left lying still.
+
+```
+17:49:47  arm delayMs=900000
+   ...    screen off, on battery, untouched
+18:05:52  FIRED lateByMs=58692        fired on wake, 59s late
+18:05:52  lock()
+```
+
+**`setTimeout` was not lost.** The worst case — the timer gone and the vault
+sitting unlocked in a pocket — does not happen. The lock did occur.
+
+**It was not on time either.** Roughly one minute late on a fifteen-minute
+timeout, and it landed the moment the device woke. The process therefore ran for
+most of the window and was throttled or briefly frozen near the end; a full
+fifteen minutes of suspension would have produced fifteen minutes of lateness,
+not one.
+
+**What this does not answer.** Fifteen minutes is short for Android's power
+management: Doze only deepens after longer stillness. A phone left overnight is
+untested, and the lateness there could be far larger than a minute.
+`browser.alarms` is the mechanism actually designed to survive this, and remains
+the honest fix if a longer idle behaves worse. Recorded in `docs/BACKLOG.md`.
+
+The trail also shows no message beacon before the `FIRED`, which confirms the
+popup was not opened first — opening it would have called `list`, touched the
+session and moved the deadline, and the run would have measured nothing.
 
 ## Where this run stands
 
