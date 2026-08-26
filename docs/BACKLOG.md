@@ -142,6 +142,33 @@ eventually be somebody's bug report. Full write-ups in `docs/DEVELOPMENT.md` →
 
 ---
 
+## 5. Traps for a future verification run
+
+Not work to be done — things that have already cost time, or nearly did, and
+would cost it again.
+
+- **Firefox fills the username by itself.** Observed 2026-08-26 on the
+  test login page: username prefilled, password empty, with no tap. It
+  cannot be this add-on — `fillFields` sets both fields in one pass
+  (`src/content/autofill.ts:184-203`), an entry with no password is refused
+  before that, and filling happens only on an explicit `fill` message
+  (`autofill.ts:239`). It is Firefox's own form autofill, or the site.
+
+  The trap is in reading the checklist: D2 and D6 both assert that a tap fills
+  username *and* password. If Firefox has already put the username there, a
+  broken username fill still looks like a pass. Check both fields are empty
+  before the tap, or run the item in a private tab where Firefox's own
+  autofill does not apply. D2 and D6 were not affected — both fields were empty
+  when they were run — but nothing in the checklist says to check.
+
+- **`web-ext` does not reload on Android**, whatever it prints. Stop it and
+  start it again after any source change, or the device keeps running the old
+  build and every conclusion is about code that is no longer in the tree.
+
+- **Extension `console.log` does not reach `adb logcat`** on Fenix. Verified
+  2026-08-26 with zero hits. Diagnostics need another channel; the loopback
+  beacon on `debug/f4-idle-lock` is one that works.
+
 ## 4. Deferred to v2
 
 Unchanged and still just a list, kept in `docs/DEVELOPMENT.md` → "Deferred to
