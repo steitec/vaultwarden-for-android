@@ -4,7 +4,8 @@ Vehicle: Firefox Nightly 156.0a1 (`org.mozilla.fenix`) on SM-N981B (`RFCN80EJ05Y
 via `web-ext run`, build from 90ee4d6.
 Baseline: 606 unit tests pass, `web-ext lint` 0 errors / 0 warnings / 0 notices.
 
-**Status: 16 of 25 passed, 1 failed (C4), 2 blocked (A1 A2, see F-3), 6 open.
+**Status: 20 of 25 passed, 1 failed (C4), 2 blocked (A1 A2, see F-3),
+1 not applicable (A3), 1 open (C3).
 Paused 2026-08-25 evening, resumed 2026-08-26.**
 Resume instructions are at the bottom.
 
@@ -15,14 +16,28 @@ Legend: `[ ]` not run · `[x]` pass · `[!]` FAIL · `[-]` skipped/blocked
       — BLOCKED, unreachable on this build. See F-3.
 - [-] A2 Denying gives a readable explanation, form keeps entered values
       — BLOCKED, unreachable on this build. See F-3.
-- [ ] A3 Server on a non-standard port (if available)
+- [-] A3 Server on a non-standard port (if available)
+      — NOT APPLICABLE, 2026-08-26. The checklist made this conditional on such a
+      server existing, and none does. Nothing was observed either way: the port-handling
+      code is covered by the unit suite only. If a non-standard-port server ever exists,
+      this is worth running then.
 
 ## B. Setup and sign-in
-- [ ] B1 `Controller.setup` completes end to end against the real https server
+- [x] B1 `Controller.setup` completes end to end against the real https server
+      — pass, 2026-08-26, the authenticator code completed the sign-in and the vault
+      screen appeared. First end-to-end run of the real first-run path on the device.
 - [x] B2 `http://` server address refused with a "use https" message — pass, 2026-08-26
-- [ ] B3 Two-factor prompt appears / lists real providers / correct code completes
-- [ ] B4 Wrong master password reported as wrong password, not as a 2FA challenge
-- [ ] B5 Vault lists entries immediately after setup
+- [x] B3 Two-factor prompt appears / lists real providers / correct code completes
+      — pass, 2026-08-26, the screen offered "Authenticator app" and nothing else,
+      matching the account. Only providers 0 and 1 are rendered by design
+      (`src/popup/screens.ts:313-315`); a security key would have produced the
+      "cannot complete" screen instead.
+- [x] B4 Wrong master password reported as wrong password, not as a 2FA challenge
+      — pass, 2026-08-26, "Email or password incorrect" on the setup form, no two-factor
+      screen. The account has 2FA enabled, so this is the sharp case: both answers are
+      HTTP 400 and only the provider list separates them (`src/api/identity.ts:154-159`).
+- [x] B5 Vault lists entries immediately after setup
+      — pass, 2026-08-26, entries listed straight away, with no "Sync now" tap in between.
 
 ## C. Lock, unlock, PIN lockout
 - [x] C1 "Lock" returns to the PIN pad — pass, on the leftover account
@@ -308,8 +323,8 @@ accurate, and the submission notes must not go out as they stand.
 
 ## Where this run stands
 
-16 of 25 passed, **1 failed (C4, see F-2)**, **2 blocked (A1 A2, see F-3)**,
-6 open. D7 counts as one item here;
+20 of 25 passed, **1 failed (C4, see F-2)**, **2 blocked (A1 A2, see F-3)**,
+1 not applicable (A3), 1 open (C3). D7 counts as one item here;
 its three parts are all pass. The throwaway account is gone: everything that
 needed a working vault is done, and only the first-run path remains.
 
@@ -320,10 +335,11 @@ no item's outcome changed. Counts below are derived from the marks rather than
 incremented by hand:
 
 ```
-passed  (16):  C1 C2 C5 · D1 D2 D3 D4 D5 D6 D7 · E1 E2 E3 · F1 F2 · B2
+passed  (20):  C1 C2 C5 · D1 D2 D3 D4 D5 D6 D7 · E1 E2 E3 · F1 F2 · B1 B2 B3 B4 B5
 failed   (1):  C4
 blocked  (2):  A1 A2
-open     (6):  A3 · B1 B3 B4 B5 · C3
+n/a      (1):  A3
+open     (1):  C3
 ```
 
 The order was rearranged once, deliberately, and the reason should survive: the
@@ -334,8 +350,8 @@ queued to run on it too. Only after F does the fresh setup happen — which is t
 only way to reach A and B, since those test the first-run path itself.
 
 ```
-done:  C1 C2 C4(!) C5 · D1 D2 D3 D4 D5 D6 D7 · E1 E2 E3 · F1 F2 · B2
-next:  B4 → B3/B1 → B5 → A3 → C3      (A1 A2 blocked, see F-3)
+done:  B1 B2 B3 B4 B5 · C1 C2 C4(!) C5 · D1 D2 D3 D4 D5 D6 D7 · E1 E2 E3 · F1 F2
+next:  C3                             (A1 A2 blocked see F-3, A3 not applicable)
 ```
 
 The remaining items are deliberately being run on the build from 90ee4d6, the
@@ -344,29 +360,21 @@ across two builds and put every earlier result in question, so the fix waits
 until the checklist is finished — unless it turns out to need a device to verify,
 in which case it is cheaper to fix, rebuild, and re-run C4 alone.
 
-### Next action: B4, then B3 / B1 / B5
+### Next action: C3, the last open item
 
-A2 and A1 are out (F-3), and B2 is done. What remains of the first-run path:
+The whole first-run path is done: A1 and A2 are out (F-3), B1–B5 all pass. One
+item remains.
 
-1. **B4 first, before finishing the sign-in.** The two-factor screen means the
-   master password was accepted, so B4 has to be reached by closing the panel and
-   reopening it — that returns a fresh setup form — and entering a **wrong**
-   master password. It must be reported as a wrong password, not as a two-factor
-   challenge. Vaultwarden answers both with HTTP 400 and only a non-empty
-   `TwoFactorProviders` list separates them (`src/api/types.ts:203-208`).
+**C3** — the 15-minute idle auto-lock. The device now holds a signed-in,
+   unlocked vault, which is exactly the state C3 needs. It is a real wait with no
+   interaction: any touch of the popup resets the timer, so park it next to
+   something else and come back. Pass means the popup opens on the PIN pad.
 
-   An earlier version of this section said B4 "cannot be tested once setup has
-   succeeded". That was too strong: signing out returns the setup form, so B4 is
-   reachable at any later point. Doing it now merely avoids a second sign-out.
+A3 is settled: there is no server on a non-standard port to point at, so it is
+recorded as not applicable rather than left open.
 
-2. **B3 / B1** — correct master password, then the two-factor screen: it must
-   list the account's real providers, and the correct code must complete the
-   sign-in. That completes B1 as well.
-
-3. **B5** — the vault lists entries immediately, with no extra sync step.
-
-Then **A3** (a server on a non-standard port, if one exists — optional) and
-**C3** (the 15-minute idle auto-lock).
+Once C3 lands, the run is finished except for C4, and the F-2 / F-3 decisions
+below are what stands between here and a submission.
 
 ### Blocked on preparation
 
@@ -395,18 +403,16 @@ Then **A3** (a server on a non-standard port, if one exists — optional) and
   what `isFillableOrigin` allows. Note that `adb reverse` does not survive a
   device reconnect. The device has no `curl` or `wget`, so the tunnel cannot be
   proven from the shell — the http server's access log is the confirmation.
-- **A3** needs a server on a non-standard port, if one exists at all. Optional.
 - **C3** is a real 15-minute wait with no interaction. Park it next to something
   else; any touch of the popup resets the timer.
 
 ### How to resume
 
-Paused 2026-08-26 midway through the fresh setup, at the two-factor screen.
-**Nothing was stored:** `Controller.setup` returns the two-factor challenge
-before it writes `StoredState` (`src/background/controller.ts`, the `catch` that
-converts `TwoFactorRequiredError` sits above the `const state: StoredState`
-block), so the device holds no account. The panel will open on a fresh setup
-form.
+The fresh setup is complete as of 2026-08-26: the device holds a signed-in
+account with the vault unlocked, reached through the real first-run path (B1–B5).
+The panel will open on the vault list, or on the PIN pad once C3's idle timer has
+run. This is no longer the throwaway account from the earlier session — treat the
+device as holding live credentials, and sign out when the run is finished.
 
 Source is unchanged since the run began — the build under test is still 90ee4d6,
 and every commit since has been documentation.
