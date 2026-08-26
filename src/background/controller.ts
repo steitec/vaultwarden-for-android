@@ -110,6 +110,15 @@ export class Controller {
   private items: VaultItem[] = [];
 
   /**
+   * Called after every lock, once the plaintext is gone.
+   *
+   * Assigned by the background page's entry point, which owns the connections
+   * to any open popup. Defaults to a no-op so a Controller is usable on its
+   * own, exactly as `Session.onLock` is.
+   */
+  onLocked: () => void = () => {};
+
+  /**
    * A badge tap that landed on a locked vault, waiting for the unlock.
    *
    * Deliberately in memory only. A background-page restart loses it, which is
@@ -130,6 +139,11 @@ export class Controller {
     // state to review for.
     session.onLock = () => {
       this.items = [];
+      // Anything watching a locked vault has to hear about it from here: this
+      // hook is the one place every lock path converges on -- the idle timer,
+      // the Lock button, signOut, and Session.init's re-entrancy guard. See
+      // F-5; the popup subscribes so an open panel stops showing the vault.
+      this.onLocked();
       // The same hook, for the same reason. A pending fill is an intent to
       // hand out a credential; a lock must discard it along with the
       // plaintext, on every path that reaches here -- the idle timer,
