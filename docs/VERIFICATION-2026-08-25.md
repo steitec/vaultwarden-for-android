@@ -4,7 +4,8 @@ Vehicle: Firefox Nightly 156.0a1 (`org.mozilla.fenix`) on SM-N981B (`RFCN80EJ05Y
 via `web-ext run`, build from 90ee4d6.
 Baseline: 606 unit tests pass, `web-ext lint` 0 errors / 0 warnings / 0 notices.
 
-**Status: 15 of 25 passed, 1 failed (C4). Paused 2026-08-25 evening, resumed 2026-08-26.**
+**Status: 13 of 25 passed, 1 failed (C4), 11 open. Paused 2026-08-25 evening,
+resumed 2026-08-26.**
 Resume instructions are at the bottom.
 
 Legend: `[ ]` not run · `[x]` pass · `[!]` FAIL · `[-]` skipped/blocked
@@ -35,9 +36,12 @@ Legend: `[ ]` not run · `[x]` pass · `[!]` FAIL · `[-]` skipped/blocked
 ## D. Autofill
 - [x] D1 Matching entries listed first on a known login page — pass, login.example.com
 - [x] D2 Tapping an entry fills username + password, popup closes — pass
-- [ ] D3 Filling works on a React-based login form
+- [x] D3 Filling works on a React-based login form — pass, 2026-08-26, on the
+      served React 18.3.1 form: both `react state` lines FILLED, verdict PASS
 - [x] D4 Non-matching entry is refused with an explanation — pass, "This entry does not match the page that is currently open…" (controller.ts:548)
-- [ ] D5 Decoy page: visible fields FILLED, both decoy fields empty
+- [x] D5 Decoy page: visible fields FILLED, both decoy fields empty — pass,
+      2026-08-26, filled via the badge. First execution of `isRenderedOffScreen`
+      in a real layout engine; the unit suite only ever reached its CSSOM half.
 - [x] D6 Badge (unlocked, matching entry): appears in the password field, tap fills both fields — pass
 - [x] D7 Badge (locked) — all three parts pass
   - [x] D7a badge appears while locked; tap opens nothing (openPopup unavailable on Android, as designed); fill happens after the PIN with no second tap.
@@ -133,7 +137,20 @@ reopening it is exactly what hides the bug.
 
 ## Where this run stands
 
-15 of 25 passed, **1 failed (C4, see F-2)**, 9 remain.
+13 of 25 passed, **1 failed (C4, see F-2)**, 11 open. D7 counts as one item here;
+its three parts are all pass.
+
+That total is lower than the one this log carried on 2026-08-25, which read "14 of
+25 passed, 11 remain". Both halves of that were wrong: 15 items were open at the
+time, so 10 had passed, not 14. The error was arithmetic, not a misread result —
+no item's outcome changed. Counts below are derived from the marks rather than
+incremented by hand:
+
+```
+passed (13):  C1 C2 C5 · D1 D2 D3 D4 D5 D6 D7 · E1 E2 E3
+failed  (1):  C4
+open   (11):  A1 A2 A3 · B1 B2 B3 B4 B5 · C3 · F1 F2
+```
 
 The order was rearranged once, deliberately, and the reason should survive: the
 device already carried **an account from an earlier test session**, and that
@@ -143,8 +160,8 @@ queued to run on it too. Only after F does the fresh setup happen — which is t
 only way to reach A and B, since those test the first-run path itself.
 
 ```
-done:  C1 C2 C4(!) C5 · D1 D2 D4 D6 D7a D7b D7c · E1 E2 E3
-next:  D3 → D5 → F1/F2 → [fresh setup] → B2 → A2 → A1 → B1 B3 B4 B5 → A3 → C3
+done:  C1 C2 C4(!) C5 · D1 D2 D3 D4 D5 D6 D7 · E1 E2 E3
+next:  F1/F2 → [fresh setup] → B2 → A2 → A1 → B1 B3 B4 B5 → A3 → C3
 ```
 
 The remaining items are deliberately being run on the build from 90ee4d6, the
@@ -153,22 +170,22 @@ across two builds and put every earlier result in question, so the fix waits
 until the checklist is finished — unless it turns out to need a device to verify,
 in which case it is cheaper to fix, rebuild, and re-run C4 alone.
 
-### Next action: D3 and D5, both on the same loopback origin
+### Next action: F1 and F2, the last items on the throwaway account
 
-They were queued as separate problems and turned out to be one. Both pages are
-served from `http://127.0.0.1:8000`, so **a single throwaway vault entry with the
-URI `http://127.0.0.1:8000`** (including the port) unblocks both. Create it in
-the web vault, sync, then visit each page in turn:
+This is the point of no return for the throwaway account, and it is deliberate:
+everything that needed a working vault is now done.
 
-- `http://127.0.0.1:8000/react-login.html` — D3. Both `react state` lines must
-  read `FILLED` and the verdict must read `PASS`; then tap "Sign in" and confirm
-  the `SUBMITTED` block carries the username and a non-zero password length.
-  A `FILLED` DOM with `EMPTY` state is the failure being hunted.
-- `http://127.0.0.1:8000/decoy.html` — D5. Tap "check": `visible-user: FILLED`,
-  `visible-pass: FILLED`, `decoy-user: empty`, `decoy-pass: empty`.
+- **F1** "Sign out" asks for confirmation first.
+- **F2** After confirming, reopening the panel shows the **setup** screen, not the
+  unlock screen.
 
-Fill each one twice if convenient — once from the popup, once from the badge —
-since they are different entry points into the same fill path.
+F2 is the one that matters. Locking only zeroes the in-memory keys; sign-out is
+the only thing that removes `protectedUserKey`, `pinWrapped`,
+`wrappedRefreshToken` and the cipher cache from `browser.storage.local`. If the
+unlock screen comes back, the wipe did not happen and that material cannot be
+taken off the phone short of uninstalling.
+
+Then the fresh setup begins, which is the only way to reach A and B.
 
 ### Blocked on preparation
 
