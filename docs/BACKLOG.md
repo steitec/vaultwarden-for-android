@@ -169,6 +169,23 @@ would cost it again.
   2026-08-26 with zero hits. Diagnostics need another channel; the loopback
   beacon on `debug/f4-idle-lock` is one that works.
 
+### 1.3 Measure the idle lock over a long idle, and decide about `browser.alarms`
+
+Measured 2026-08-26, screen off and on battery: the fifteen-minute idle lock
+fired, but **59 seconds late**, and it landed the instant the device woke. So
+`setTimeout` is not lost — the worst case does not happen — but it is throttled.
+
+Fifteen minutes is short for Android's power management; Doze deepens with longer
+stillness. A phone left overnight has not been measured, and the lateness there
+could be far larger. The rig for it exists: branch `debug/f4-idle-lock` plus the
+loopback beacon, and `lateByMs` is computed from the wall clock, so it stays
+honest however late the beacon itself arrives.
+
+If a long idle is much worse, the fix is `browser.alarms`, which is designed to
+survive suspension and needs the `alarms` permission. That is a larger change
+than either fix this run produced, which is why it is a measurement first and a
+decision second. Full trail in `docs/VERIFICATION-2026-08-25.md` § F-4.
+
 ## 4. Deferred to v2
 
 Unchanged and still just a list, kept in `docs/DEVELOPMENT.md` → "Deferred to
