@@ -18,8 +18,88 @@ function tapBadge(): void {
   host().dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
 }
 
+/**
+ * jsdom runs no layout engine, so every rect is zero and every badge would
+ * land at the origin. These fakes are the only way to say "the field is
+ * HERE now, and there it went" — which is the whole of what the badge has
+ * to keep up with.
+ */
+function placeField(field: HTMLInputElement, top: number, right = 300): void {
+  field.getBoundingClientRect = () =>
+    ({
+      top,
+      bottom: top + 40,
+      left: right - 200,
+      right,
+      width: 200,
+      height: 40,
+      x: right - 200,
+      y: top,
+      toJSON: () => ({}),
+    }) as DOMRect;
+}
+
+/** The `top` the badge should be parked at for a field placed at `top`. */
+function expectedTop(fieldTop: number): string {
+  return `${fieldTop + (40 - 24) / 2}px`;
+}
+
+/**
+ * Stands in for the layout engine's answer to "what is drawn at this point".
+ *
+ * The order is the real one: topmost FIRST, and everything underneath it
+ * follows — covered or not. That is what makes an occlusion check possible
+ * at all, and it is also the trap: the field stays in this list when a menu
+ * is painted over it, so its mere presence proves nothing. Verified on the
+ * device, where a field behind an open menu was still reported at every
+ * corner of the badge.
+ *
+ * jsdom has no elementsFromPoint at all, so a test that wants one installs
+ * it and removes it again.
+ */
+function stackAtBadge(...els: Element[]): void {
+  (document as unknown as { elementsFromPoint: unknown }).elementsFromPoint = () => els;
+}
+
+/**
+ * A layout engine whose answer depends on where it is asked: everything
+ * above `edge` is the overlay, everything below it is the field. That is a
+ * menu whose lower border cuts across the badge.
+ */
+function stackSplitAt(edge: number, field: HTMLInputElement, overlay: Element): void {
+  (document as unknown as { elementsFromPoint: unknown }).elementsFromPoint = (
+    _x: number,
+    y: number,
+  ) => (y < edge ? [host(), overlay, field] : [host(), field]);
+}
+
+function noStack(): void {
+  delete (document as unknown as { elementsFromPoint?: unknown }).elementsFromPoint;
+}
+
+/** A ResizeObserver that fires when the test says so, since jsdom has none. */
+function fakeResizeObserver(): { fire: () => void; observed: () => unknown[] } {
+  const callbacks: (() => void)[] = [];
+  const observed: unknown[] = [];
+  class FakeResizeObserver {
+    constructor(cb: () => void) {
+      callbacks.push(cb);
+    }
+    observe(target: unknown): void {
+      observed.push(target);
+    }
+    disconnect(): void {
+      callbacks.length = 0;
+    }
+  }
+  vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+  return { fire: () => callbacks.forEach((cb) => cb()), observed: () => observed };
+}
+
 beforeEach(() => {
   document.body.innerHTML = "";
+  noStack();
+  vi.unstubAllGlobals();
 });
 
 describe("mountBadge", () => {
@@ -103,5 +183,137 @@ describe("mountBadge", () => {
     mountBadge(passwordField(), "fill", () => {});
     expect(host().style.position).toBe("absolute");
     expect(host().style.zIndex).toBe("2147483647");
+  });
+});
+
+describe("the badge keeps up with its field", () => {
+  it("moves with the field when the page scrolls", () => {
+    const field = passwordField();
+    placeField(field, 500);
+    mountBadge(field, "fill", () => {});
+    expect(host().style.top).toBe(expectedTop(500));
+
+    placeField(field, 120);
+    window.dispatchEvent(new Event("scroll"));
+
+    expect(host().style.top).toBe(expectedTop(120));
+  });
+
+  it("moves with the field when the layout shifts without a scroll", () => {
+    // The reported case: a menu expands inside a sticky header and pushes the
+    // form down. No scroll, no childList mutation — the site toggles one
+    // attribute — so this is the only signal there is.
+    const resize = fakeResizeObserver();
+    const field = passwordField();
+    placeField(field, 500);
+    mountBadge(field, "fill", () => {});
+
+    placeField(field, 780);
+    resize.fire();
+
+    expect(host().style.top).toBe(expectedTop(780));
+  });
+
+  it("watches the field and the document, not just the window", () => {
+    const resize = fakeResizeObserver();
+    const field = passwordField();
+    mountBadge(field, "fill", () => {});
+    expect(resize.observed()).toContain(field);
+    expect(resize.observed()).toContain(document.documentElement);
+  });
+
+  it("moves with the field when the viewport resizes", () => {
+    const field = passwordField();
+    placeField(field, 500);
+    mountBadge(field, "fill", () => {});
+
+    placeField(field, 60);
+    window.dispatchEvent(new Event("resize"));
+
+    expect(host().style.top).toBe(expectedTop(60));
+  });
+
+  it("stops following once it is unmounted", () => {
+    // A listener left on the window outlives the badge it was moving and
+    // reaches for a field the page may have replaced.
+    const field = passwordField();
+    placeField(field, 500);
+    const unmount = mountBadge(field, "fill", () => {});
+    const detached = host();
+    unmount();
+
+    placeField(field, 900);
+    expect(() => window.dispatchEvent(new Event("scroll"))).not.toThrow();
+    expect(detached.style.top).toBe(expectedTop(500));
+  });
+});
+
+describe("the badge shows itself only where its field is visible", () => {
+  it("hides when something is drawn over the field", () => {
+    const field = passwordField();
+    placeField(field, 500);
+    mountBadge(field, "fill", () => {});
+
+    // The field is still in the stack — an engine reports what is behind the
+    // overlay too. What changed is that it is no longer the topmost thing.
+    const overlay = document.createElement("div");
+    stackAtBadge(host(), overlay, field);
+    window.dispatchEvent(new Event("scroll"));
+
+    expect(host().style.display).toBe("none");
+  });
+
+  it("comes back when the field is clear again", () => {
+    const field = passwordField();
+    placeField(field, 500);
+    mountBadge(field, "fill", () => {});
+
+    stackAtBadge(host(), document.createElement("div"), field);
+    window.dispatchEvent(new Event("scroll"));
+    stackAtBadge(host(), field);
+    window.dispatchEvent(new Event("scroll"));
+
+    expect(host().style.display).not.toBe("none");
+  });
+
+  it("stays visible when nothing can answer what is on top", () => {
+    // jsdom, and any engine without elementsFromPoint. An unanswerable
+    // question must not blank the badge on every page.
+    const field = passwordField();
+    placeField(field, 500);
+    mountBadge(field, "fill", () => {});
+    window.dispatchEvent(new Event("scroll"));
+    expect(host().style.display).not.toBe("none");
+  });
+
+  it("stays visible when the point is outside the viewport entirely", () => {
+    // An empty stack is what a real engine returns for a point that is not
+    // on screen. The badge is not visible there either way, and treating it
+    // as an occlusion would hide a badge that scrolling is about to reveal.
+    const field = passwordField();
+    placeField(field, 500);
+    mountBadge(field, "fill", () => {});
+
+    stackAtBadge();
+    window.dispatchEvent(new Event("scroll"));
+
+    expect(host().style.display).not.toBe("none");
+  });
+
+
+  it("hides when only part of it is covered", () => {
+    // The badge is 24px tall and centred on the field, so a menu whose lower
+    // edge falls between the two leaves the centre clear while the top half
+    // is painted over the menu. Asking about the centre alone answers "the
+    // field is right there" and shows a badge stuck to the menu's underside.
+    const field = passwordField();
+    placeField(field, 500);
+    mountBadge(field, "fill", () => {});
+
+    // The field's centre is at 520; the badge spans 508..532.
+    stackSplitAt(515, field, document.createElement("div"));
+    window.dispatchEvent(new Event("scroll"));
+
+    expect(host().style.display).toBe("none");
   });
 });
