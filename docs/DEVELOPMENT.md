@@ -480,6 +480,95 @@ gesture.
     its pending fill **discarded** rather than guessed at, as does a tap older
     than two minutes
 
+- [ ] **The badge stays with its field when the page's layout moves, and hides
+      when the field is covered.** Found 2026-08-27 on login.example.com:
+      opening the site's hamburger menu pushed the form down and the badge
+      stayed at its old document coordinates, floating above the heading and
+      then riding over the menu on scroll.
+
+  Serve `menu.html` below and reach it as `http://127.0.0.1:8000/menu.html`
+  (same `adb reverse` as `decoy.html`). The page carries its own readout, which
+  is what turned this from guesswork into a measurement: it prints the badge's
+  inline `display`, the field's centre, and what `document.elementsFromPoint`
+  reports at each corner of the badge.
+
+  Expect: menu open and the field still clear → badge in the field. Field
+  scrolled behind the sticky menu → readout shows `NAV#menu` at the upper
+  corners and `display=[none]`. Menu closed → badge back in the field.
+
+  **`elementsFromPoint` returns the whole stack at a point** — topmost first,
+  and everything underneath it after, covered or not. A field behind an open
+  menu is still in that list, which is why only the FIRST entry answers "what
+  is drawn here". A check written as `stack.includes(field)` looks right, passes
+  a test whose stub omits the covered field, and never hides anything.
+
+```html
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Menu overlap probe</title>
+<style>
+  body { margin:0; background:#0f172a; color:#e2e8f0; font-family:sans-serif; }
+  header { position:sticky; top:0; z-index:50; background:#1e293b; border-bottom:1px solid #334155; }
+  .bar { display:flex; align-items:center; justify-content:space-between; height:64px; padding:0 16px; }
+  #menu { display:none; padding:0 16px 16px; }
+  #menu.open { display:block; }
+  #menu a { display:block; padding:8px 0; color:#cbd5e1; }
+  main { padding:24px 16px; }
+  .card { background:#1e293b; border-radius:12px; padding:24px; max-width:420px; margin:0 auto; }
+  label { display:block; margin:16px 0 6px; }
+  input { width:100%; box-sizing:border-box; padding:12px; border-radius:8px;
+          border:1px solid #475569; background:#334155; color:#f8fafc; font-size:16px; }
+  .filler { height:1200px; }
+  #probe { position:fixed; left:0; right:0; bottom:0; z-index:2147483646; background:#000c;
+           color:#a7f3d0; font:12px monospace; padding:6px; white-space:pre-wrap; }
+</style></head>
+<body>
+<header>
+  <div class="bar"><strong>Probe</strong><button id="burger">☰</button></div>
+  <nav id="menu"><a href="#">Home</a><a href="#">People</a><a href="#">Records</a><a href="#">Map</a><a href="#">Sign in</a></nav>
+</header>
+<main>
+  <div class="card">
+    <h1>Sign in</h1>
+    <label for="u">Username</label><input id="u" type="text" autocomplete="username">
+    <label for="p">Password</label><input id="p" type="password" autocomplete="current-password">
+  </div>
+  <div class="filler"></div>
+</main>
+<pre id="probe"></pre>
+<script>
+  document.getElementById("burger").addEventListener("click", () => {
+    document.getElementById("menu").classList.toggle("open");
+  });
+
+  // Reports what the extension's own visibility check would see, measured
+  // from the page side: the field's rect, the badge host's inline display,
+  // and the hit-test answer at each corner of the badge.
+  const SIZE = 24, INSET = 4, reach = SIZE / 2 - 1;
+  function name(el) { return el === field ? "FIELD" : el.id ? el.tagName + "#" + el.id : el.tagName; }
+  const field = document.getElementById("p");
+  const out = document.getElementById("probe");
+  function tick() {
+    const host = document.querySelector("[data-vw-badge]");
+    const r = field.getBoundingClientRect();
+    const cx = r.right - INSET - SIZE / 2, cy = r.top + r.height / 2;
+    const corners = [[-reach,-reach],[reach,-reach],[-reach,reach],[reach,reach]];
+    const seen = corners.map(([dx,dy]) => {
+      const stack = document.elementsFromPoint(cx+dx, cy+dy);
+      return (stack[0] ? name(stack[0]) : "-") + (stack.some(e => e === field) ? "+F" : "");
+    });
+    out.textContent =
+      "badge: " + (host ? "display=[" + host.style.display + "] top=" + host.style.top : "ABSENT") +
+      "\\nfield centre: " + Math.round(cx) + "," + Math.round(cy) +
+      "\\ncorners: " + seen.join("  ");
+    requestAnimationFrame(tick);
+  }
+  tick();
+</script>
+</body></html>
+```
+
 ### Offline and sync
 
 - [ ] Turn off wifi and mobile data; the vault still unlocks and lists entries
