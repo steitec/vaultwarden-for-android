@@ -169,6 +169,15 @@ would cost it again.
   start it again after any source change, or the device keeps running the old
   build and every conclusion is about code that is no longer in the tree.
 
+- **Reinstalling does not reach a page that is already open.** Established
+  2026-08-27, after two rounds of testing a fix against the old code. A
+  reinstalled extension injects its content script into *new* page loads only,
+  and `adb shell am start` with a URL the tab already holds re-focuses that tab
+  without loading anything. The screenshot then shows the previous build's
+  badge, sitting exactly where it was left. Add a cache-busting query
+  (`?r=$(date +%s)`) so the navigation is real, and confirm from the tab
+  count or the URL that it happened.
+
 - **Extension `console.log` does not reach `adb logcat`** on Fenix. Verified
   2026-08-26 with zero hits. Diagnostics need another channel; the loopback
   beacon on `debug/f4-idle-lock` is one that works.
