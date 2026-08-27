@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { mountBadge, BADGE_HOST_ATTR } from "../../src/content/badge";
+import { mountBadge, buildGlyph, BADGE_HOST_ATTR } from "../../src/content/badge";
 
 function passwordField(): HTMLInputElement {
   document.body.innerHTML = `<input type="password" id="pw">`;
@@ -315,5 +315,69 @@ describe("the badge shows itself only where its field is visible", () => {
     window.dispatchEvent(new Event("scroll"));
 
     expect(host().style.display).toBe("none");
+  });
+});
+
+describe("the badge's glyph", () => {
+  const MODES = ["fill", "chooser", "unlock"] as const;
+
+  it("draws a different shape for every mode", () => {
+    // The three states differ in what a tap does: fill fills the form where
+    // it stands, chooser and unlock both send the user into the add-on. A
+    // user who cannot tell them apart before tapping learns the difference
+    // by tapping and seeing nothing happen.
+    const shapes = MODES.map((mode) => buildGlyph(document, mode).outerHTML);
+    expect(new Set(shapes).size).toBe(3);
+  });
+
+  it("gives chooser the fill lock plus a marker, rather than an unrelated shape", () => {
+    // Several matches is still "the vault has this", so it keeps the lock;
+    // what it adds is the vertical ellipsis Android uses for an overflow
+    // menu, which is the part that says a list is about to open.
+    const lock = [...buildGlyph(document, "fill").children].map((c) => c.outerHTML);
+    const chooser = [...buildGlyph(document, "chooser").children].map((c) => c.outerHTML);
+    expect(chooser).toEqual(expect.arrayContaining(lock));
+    expect(chooser.length).toBeGreaterThan(lock.length);
+  });
+
+  it("scales with its box rather than with whatever font the device ships", () => {
+    // The emoji this replaced were drawn by the system emoji font, so the
+    // badge looked like whatever that font had — and at 14px a closed lock
+    // and an open one differ by the lean of a shackle.
+    for (const mode of MODES) {
+      const svg = buildGlyph(document, mode);
+      expect(svg.tagName.toLowerCase()).toBe("svg");
+      expect(svg.getAttribute("viewBox")).toBeTruthy();
+    }
+  });
+
+  it("takes its colour from the host, so the badge's own styling reaches it", () => {
+    // `color:#ffffff` on the glyph element does nothing to a colour emoji.
+    // Drawing with currentColor is what turns that declaration from dead
+    // into the thing that makes the glyph white.
+    for (const mode of MODES) {
+      for (const el of buildGlyph(document, mode).querySelectorAll("*")) {
+        for (const attr of ["stroke", "fill"]) {
+          const value = el.getAttribute(attr);
+          if (value === null) continue;
+          expect(value).toMatch(/^(currentColor|none)$/);
+        }
+      }
+    }
+  });
+
+  it("draws the glyph rather than typing a character", () => {
+    // A page may enforce Trusted Types, under which an innerHTML in a
+    // content script throws instead of rendering. Built nodes have no such
+    // question, and this is the only seam a test has: the shadow root is
+    // closed, so the glyph itself cannot be looked at from out here.
+    const created = vi.spyOn(document, "createElementNS");
+    try {
+      mountBadge(passwordField(), "fill", () => {});
+      const tags = created.mock.calls.map(([ns, tag]) => `${String(ns)}|${String(tag)}`);
+      expect(tags).toContain("http://www.w3.org/2000/svg|svg");
+    } finally {
+      created.mockRestore();
+    }
   });
 });
