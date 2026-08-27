@@ -6,16 +6,18 @@ Baseline: 606 unit tests pass, `web-ext lint` 0 errors / 0 warnings / 0 notices.
 
 **Status: 22 of 25 passed, nothing failing, 2 blocked (A1 A2, see F-3),
 1 not applicable (A3), 0 open. C3 and C4 passed on re-runs against the fixes.
-Paused 2026-08-25 evening, resumed 2026-08-26.**
+Paused 2026-08-25 evening, resumed 2026-08-26. Closed 2026-08-27 with the F-3
+decision, which retires A1 and A2 rather than unblocking them.**
 Resume instructions are at the bottom.
 
 Legend: `[ ]` not run · `[x]` pass · `[!]` FAIL · `[-]` skipped/blocked
 
 ## A. Host permission — highest risk
 - [-] A1 "Sign in" raises Firefox's permission prompt naming the server host; accepting continues setup
-      — BLOCKED, unreachable on this build. See F-3.
+      — BLOCKED, unreachable on this build. RETIRED 2026-08-27 by the F-3 decision:
+      the prompt cannot exist, and the checklist now asserts its absence instead.
 - [-] A2 Denying gives a readable explanation, form keeps entered values
-      — BLOCKED, unreachable on this build. See F-3.
+      — BLOCKED, unreachable on this build. RETIRED with A1, same reason.
 - [-] A3 Server on a non-standard port (if available)
       — NOT APPLICABLE, 2026-08-26. The checklist made this conditional on such a
       server existing, and none does. Nothing was observed either way: the port-handling
@@ -344,6 +346,43 @@ inheriting from a commit that was about something else.
 Not a blocker for the private install. It is a blocker for the AMO text being
 accurate, and the submission notes must not go out as they stand.
 
+**Decided 2026-08-27: option 1, keep the required grant.** On Android there is
+no autofill-service route to a login form, so the inline badge is how this
+add-on reaches one at all — and option 2 does not buy a narrower posture, it
+buys no badge on the pages the badge exists for. A third option was weighed and
+rejected for the same reason: `activeTab` would cover the popup-driven fill with
+no host grant whatsoever, since the user's tap on the browser action is the
+gesture it needs, but it cannot put anything on the page beforehand.
+
+What that decision changed, all in the same commit as this paragraph:
+
+- `optional_permissions` is gone from the manifest. Declaring a wildcard as
+  optional that is already required asks for nothing and tells a reviewer that
+  some access is deferred to a runtime prompt, which is false.
+- `permissions.request()` in `submitSetup`, its denial branch, and
+  `SetupValues.originPattern` are gone; so are `permissions.contains()` in
+  `Controller.setup` and `HostPermissionDeniedError`. Against a wildcard already
+  held, every one of them could only answer yes.
+- The two comments in `src/content/autofill.ts` now describe a statically
+  declared content script, which is what it is.
+- `docs/AMO-SUBMISSION.md` § "Server access" no longer claims the broad pattern
+  is never requested. It describes one grant taken at install, and says plainly
+  that the extension contacts exactly one server.
+- The checklist's "Host permission" section in `docs/DEVELOPMENT.md` retires A1
+  and A2 and asserts the opposite of what they asserted: no prompt during
+  sign-in. A prompt there would now mean the manifest had been narrowed without
+  the popup being given a way to ask again.
+
+The unit suite lost five tests that existed only to pin the request, and gained
+two that pin what the port question turned into: a server on a non-standard port
+reaches setup with its port intact. 610 pass, `web-ext lint` is 0/0/0.
+
+Left for the listing, not for the code: the reviewer will ask why the add-on
+needs every https site. The answer is the badge, and it is the answer the note
+now gives. Bitwarden's own extension holds a comparable grant — worth checking
+against its published manifest before leaning on it in a reply, rather than
+asserting it.
+
 ### F-4 — The 15-minute idle auto-lock did not happen (C3's failure)
 
 Observed 2026-08-26: the vault was left alone for more than fifteen minutes with
@@ -593,9 +632,9 @@ All three are merged to `main`.
 
 What remains is not verification work:
 
-1. **F-3** needs a decision — keep the required `https://*/*` or return to a
-   per-host grant. A1 and A2 stay blocked until it is answered, and
-   `docs/AMO-SUBMISSION.md` contradicts itself until it is acted on.
+1. **F-3 is decided** (2026-08-27): the required grant stays, the dead per-host
+   machinery is gone, and `docs/AMO-SUBMISSION.md` no longer contradicts itself.
+   A1 and A2 are retired rather than unblocked. See the end of § F-3.
 2. **H2 is measured for fifteen minutes and no longer.** Screen off and on
    battery, the idle lock fired 59 seconds late — throttled, not lost. A phone
    left overnight has not been measured, and `browser.alarms` is the fix if a
@@ -675,10 +714,11 @@ Three things that cost time and need not cost it again:
   (`grep -c '^\s*- \[x\]'` and friends), never by incrementing the previous
   number.
 
-### The one decision left
+### Nothing in this log is outstanding
 
-- **F-3** (the required `https://*/*`) needs a decision between keeping the broad
-  install-time grant and returning to a per-host one. A1 and A2 stay blocked
-  until it is answered, and `docs/AMO-SUBMISSION.md` contradicts itself until it
-  is acted on. Nothing else in this log is outstanding: F-2, F-4 and F-5 are all
-  fixed, confirmed on the device, and merged.
+F-2, F-4 and F-5 are fixed, confirmed on the device, and merged. F-3 was decided
+on 2026-08-27 in favour of the required grant, and everything that decision
+implied for the code and the AMO text was done with it — see the end of § F-3.
+A1 and A2 are retired, not pending.
+
+What is left belongs to `docs/BACKLOG.md`, and none of it is verification work.

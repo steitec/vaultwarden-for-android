@@ -195,35 +195,36 @@ stubbed out in tests, or the behaviour only exists inside a real layout or
 permission engine. A failure in any of these is a shipping blocker, so each item
 says what it would mean.
 
-### Host permission — the highest-risk item on this list
+### Host permission — granted at install, never asked for
 
-- [ ] **Tapping "Sign in" raises Firefox's own permission prompt, naming the
-      configured server host, and accepting it lets setup continue.**
+- [ ] **Installing the add-on shows Firefox's own install-time warning naming
+      access to all https sites, and signing in afterwards raises no further
+      prompt.**
 
-  Firefox honours `permissions.request()` only while a user-input handler is
-  still on the JS stack, and that gesture does **not** survive a
-  `runtime.sendMessage` hop. This has already broken once: the background page
-  was doing the asking, which throws "permissions.request may only be called
-  from a user input handler" for every real user (fixed in `f8be844`; the popup
-  took over the asking in Task 15). The unit suite stubs `browser.permissions`
-  wholesale, so it can never catch a regression here — this checklist item is
-  the only test this code path will ever get. If the prompt does not appear, or
-  appears and setup still fails, nobody can complete first-run setup at all.
+  Decided 2026-08-27: `https://*/*` is a **required** permission, because the
+  badge has to be drawable on a login page before the user has told the add-on
+  anything. See § F-3 of `docs/VERIFICATION-2026-08-25.md` for the posture and
+  what it costs at review time.
 
-- [ ] **Denying the prompt produces a readable explanation, not a stack trace,
-      and the sign-in form stays on screen with the entered values.**
+  Two items stood here until that decision — that tapping "Sign in" raises a
+  per-host prompt, and that denying it explains itself — and both had become
+  untestable: the popup's `permissions.request()` could only ever resolve true
+  against a wildcard already held. Both the request and the background's
+  `permissions.contains()` check are gone. A prompt appearing during sign-in now
+  means the manifest has been narrowed without the popup being given a way to
+  ask again.
+
+### Setup and sign-in
 
 - [ ] **A server on a non-standard port** (e.g. `https://vault.example.net:8443`),
       if one is available.
 
-  The requested match pattern deliberately drops the port, because Firefox match
-  patterns have no port component (bug 1362809) and `https://host:8443/*` is not
-  a narrower pattern but an invalid one that `permissions.request()` rejects
-  outright. That is correct per the documentation and has never been seen
-  against a real prompt. If it is wrong, self-hosted servers on non-standard
-  ports are simply unusable.
-
-### Setup and sign-in
+  This used to be a permission question — the requested match pattern had to
+  drop the port, because Firefox match patterns have no port component (bug
+  1362809) and `https://host:8443/*` is invalid rather than narrower. With no
+  runtime request left the port is carried through as typed, and what remains
+  untested on a device is the API layer and the entry matcher against such an
+  address.
 
 - [ ] **`Controller.setup` completes end to end against a real https server** —
       server URL, email, master password, and a PIN of six or more characters.
