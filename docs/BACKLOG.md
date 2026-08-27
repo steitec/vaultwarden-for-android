@@ -63,39 +63,20 @@ decision second. Full trail in `docs/VERIFICATION-2026-08-25.md` § F-4.
 
 ## 2. Before anything is submitted to AMO
 
-### 2.1 Decide the permission posture (F-3)
+The permission posture was decided on 2026-08-27 — the required `https://*/*`
+stays, because the badge has to be drawable before the user has told the add-on
+anything. The dead per-host machinery is gone, the AMO note describes one grant
+taken at install, and checklist items A1 and A2 are retired. Everything that
+decision implied is done; § F-3 of `docs/VERIFICATION-2026-08-25.md` carries it,
+including the one thing left for the listing itself: the reviewer will ask why
+every https site is needed, and the note now answers it.
 
-`https://*/*` became a **required** permission in `dade555` as a side effect of
-declaring the content script statically. Keep the broad install-time grant, or go
-back to a per-host grant with `browser.contentScripts.register()`? Both options,
-and why the narrow one is not the obvious win, are in
-`docs/VERIFICATION-2026-08-25.md` § F-3.
-
-Everything below in section 2 depends on this answer. It is also what makes A1
-and A2 blocked rather than failed — whichever way it goes, those two checklist
-items need rewriting or removing.
-
-### 2.2 Stop `docs/AMO-SUBMISSION.md` contradicting itself
-
-Its "Page access" paragraph describes the manifest as it is; its "Server access"
-paragraph still claims "The broad pattern is never requested" and presents the
-single-host `permissions.request()` as the live mechanism. A reviewer reading
-both sees a contradiction, and the second claim is the false one. **This must not
-go out as it stands.**
-
-### 2.3 Remove what the permission change left behind
-
-Dead code and false comments, all listed in § F-3: `HostPermissionDeniedError`
-and the denial branch in `submitSetup`, the now-redundant `optional_permissions`,
-and two comments in `src/content/autofill.ts` that still describe on-demand
-injection.
-
-### 2.4 Re-read the reviewer note against the code
+### 2.1 Re-read the reviewer note against the code
 
 It makes specific, checkable claims and has never been through a review. See
 `docs/DEVELOPMENT.md` → "The AMO reviewer note has never been through a review".
 
-### 2.5 Build the `package` / `sign` scripts
+### 2.2 Build the `package` / `sign` scripts
 
 Designed and agreed on 2026-08-25, deliberately not built. The design, and why it
 is two scripts rather than one, is in `docs/DEVELOPMENT.md` → "Signing and
@@ -103,7 +84,7 @@ submission: designed, not built". One point in it is open on purpose: the script
 hardcodes `--channel=listed`, but the route needed first is `--channel=unlisted`
 (`docs/PRIVATE-INSTALL.md`).
 
-### 2.6 Pick a licence and put it in the repository
+### 2.3 Pick a licence and put it in the repository
 
 There is no `LICENSE` or `COPYING` file, and `package.json` carries no `license`
 field — only `"private": true`, which is a different thing (it stops an
@@ -112,7 +93,7 @@ licence the default is "all rights reserved", which sits badly with a listed
 AMO add-on whose source archive is uploaded for review and, for a listed
 listing, shown with a licence on its page.
 
-Independent of 2.1 and of everything else in this section — it can be done at
+Independent of everything else in this section — it can be done at
 any point, and it is a decision rather than work.
 
 The decision worth making deliberately, since it is the same question
