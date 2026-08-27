@@ -569,6 +569,25 @@ gesture.
 </body></html>
 ```
 
+- [ ] **The three badge states can be told apart at 24px on the phone.** The
+      glyphs became inline SVG on 2026-08-27: a lock for `fill`, the same lock
+      with Android's overflow ellipsis beside it for `chooser`, a key for
+      `unlock`. Until then all three were colour emoji drawn by the device's own
+      emoji font, where `fill` and `chooser` were identical and `unlock`
+      differed only by the lean of a shackle.
+
+  Only a device answers this. `buildGlyph` is unit-tested for what it draws and
+  for the three being different, never for whether a held phone shows the
+  difference.
+
+  All three are reachable from one page: with the vault unlocked and exactly one
+  entry for the origin the badge is `fill`; add a second entry for the same
+  origin and it is `chooser`; lock the vault and it is `unlock`.
+
+  If the ellipsis reads as dirt rather than as a menu, the next shape to try is
+  a dropdown chevron. What has to arrive is "a list is about to open", not the
+  dots in particular.
+
 ### Offline and sync
 
 - [ ] Turn off wifi and mobile data; the vault still unlocks and lists entries

@@ -8,7 +8,7 @@ already lives somewhere — a finding in the verification log, a section in
 it. Restating it is how the two versions start disagreeing.
 
 The manual verification run of 2026-08-25 is **finished** — 22 of 25 passed,
-nothing failing, A1 and A2 blocked on 2.1 below. All three defects it found (F-2,
+nothing failing, A1 and A2 retired by the F-3 decision rather than blocked. All three defects it found (F-2,
 F-4, F-5) are fixed, confirmed on the device, and merged to `main`, so the source
 is no longer frozen and anything here may be picked up. The run itself is in
 `docs/VERIFICATION-2026-08-25.md`.
@@ -17,32 +17,7 @@ is no longer frozen and anything here may be picked up. The run itself is in
 
 ## 1. Before the private install
 
-### 1.1 Badge icon: a lock and a key, not two locks
-
-Decided 2026-08-26. `src/content/badge.ts:20-24` uses `\u{1F512}` (🔒) for both
-`fill` and `chooser`, and `\u{1F513}` (🔓) for `unlock`. The two differ only in
-whether the shackle leans, which at the badge's 14px is a couple of pixels.
-Replace the `unlock` glyph with a key so the two states differ in shape rather
-than in one detail of the same shape.
-
-Two things found while looking, worth having in hand before touching it:
-
-- `color:#ffffff` on the glyph element (`badge.ts:59`) does nothing. Colour emoji
-  ignore `color` and are drawn by the system emoji font, so the badge is
-  currently a system-coloured glyph on the dark blue background, not a white one.
-  Inline SVG would put that back under our control; the emoji route keeps the
-  dependency on whatever font the device happens to ship.
-- **Nothing tests the glyph.** The badge tests assert on `BADGE_HOST_ATTR` and
-  the per-mode `aria-label`s, both of which already distinguish all three modes
-  correctly. `docs/superpowers/plans/2026-08-25-inline-autofill-badge.md:567`
-  quotes the old line and should be left alone as a historical plan.
-
-Still open, and not answered by this decision: `fill` and `chooser` share one
-glyph, so the badge does not distinguish "one entry, tapping fills it" from
-"several entries, tapping opens a chooser". That may well be right — the tap is
-safe either way — but it is a choice, not an accident, and nothing records it.
-
-### 1.2 Measure the idle lock over a long idle, and decide about `browser.alarms`
+### 1.1 Measure the idle lock over a long idle, and decide about `browser.alarms`
 
 Measured 2026-08-26, screen off and on battery: the fifteen-minute idle lock
 fired, but **59 seconds late**, and it landed the instant the device woke. So
