@@ -185,17 +185,21 @@ Include this text:
 > meantime, or a tap older than two minutes, is discarded rather than guessed
 > at. The fill then runs through the same validation described above.
 >
-> **Server access.** The manifest also declares `optional_permissions:
-> ["https://*/*"]` for the user's own server. Manifest V2 has no way to express
-> a runtime-determined origin — the server address is typed during setup and is
-> not known when the manifest is written — so a pattern has to be named
-> statically. The broad pattern is never requested. The popup calls
-> `permissions.request({ origins: ["https://<the entered host>/*"] })` for that
-> single host, from inside the sign-in button's own event handler, and the
-> background page independently verifies the same single-host grant with
-> `permissions.contains()` before it makes any network call. The port is
-> deliberately omitted because Firefox match patterns have no port component
-> (bugzilla 1362809); a portless host pattern is the only form Firefox accepts.
+> **Server access.** The user's own Vaultwarden server is reached under the same
+> https grant described above, and the extension asks for nothing at runtime.
+> Manifest V2 cannot express a runtime-determined origin — the server address is
+> typed during setup and is not known when the manifest is written — so a pattern
+> has to be named statically; since the content script already requires
+> `https://*/*` at install time, a separate request for the single configured
+> host would prompt for access that is already held. The extension therefore
+> holds one https grant, taken at install, and no permission prompt appears
+> during sign-in.
+>
+> It contacts exactly one server: the address the user typed, and no other. That
+> address must be https — a plain-http server is refused at setup, before
+> anything is sent, because sign-in posts the derived master password hash to it
+> and every sync carries a bearer token to it. The two loopback patterns are for
+> filling into locally served pages; a loopback address is refused as a server.
 >
 > **Cryptography** uses WebCrypto throughout: PBKDF2-HMAC-SHA256 and SHA-256 for
 > the account key derivation, HKDF-Expand (implemented over WebCrypto HMAC-SHA256,

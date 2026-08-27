@@ -44,16 +44,6 @@ export class InsecureServerUrlError extends Error {
   }
 }
 
-export class HostPermissionDeniedError extends Error {
-  constructor(origin: string) {
-    super(
-      `This add-on needs your permission to contact ${origin}. ` +
-        "Setup cannot continue without it.",
-    );
-    this.name = "HostPermissionDeniedError";
-  }
-}
-
 /** Zeroes a login result's key material after a failed adoption. */
 function zeroKeys(userKey: SymKey, orgKeys: Map<string, SymKey>): void {
   zero(userKey.encKey);
@@ -228,12 +218,13 @@ export class Controller {
    * First-run master-password login: verifies the credentials, unwraps the
    * vault keys, wraps them under the PIN, and writes the account to disk.
    *
-   * Host access is verified for the ONE origin the user configured, never
-   * for the broad https wildcard the manifest has to declare. MV2 cannot
-   * express a runtime-determined origin in `optional_permissions`, so the
-   * manifest names a pattern; the extension only ever holds the single
-   * origin the popup asked for. The check happens before the first network
-   * call, so a missing grant costs nothing and leaks nothing to the server.
+   * Host access is not checked here, and cannot usefully be: the broad https
+   * wildcard is a REQUIRED permission (manifest.json), so every https server
+   * a user could enter is granted at install time. The popup used to ask for the
+   * one configured origin and this method used to verify it with
+   * `permissions.contains()`; against a wildcard already held, both could
+   * only ever answer yes. Decided 2026-08-27 — see § F-3 of
+   * `docs/VERIFICATION-2026-08-25.md` for the posture and its price.
    *
    * Failure atomicity: nothing touches the session until the store has
    * accepted the new state (see Session.adoptLogin). If the PIN wrap or the
@@ -244,8 +235,7 @@ export class Controller {
    * A 2FA challenge comes back as a resolved `SetupResult` and not as a
    * rejection; see `SetupResult` in messages.ts for why the exception cannot
    * carry the provider list across the message boundary. Every other login
-   * failure — wrong credentials, an unreachable server, a refused host
-   * permission — still throws.
+   * failure — wrong credentials, an unreachable server — still throws.
    */
   async setup(params: {
     serverUrl: string;
@@ -263,25 +253,6 @@ export class Controller {
       throw new InsecureServerUrlError();
     }
     if (parsed.protocol !== "https:") throw new InsecureServerUrlError();
-
-    // contains(), not request(): Firefox only allows permissions.request()
-    // from inside a user input handler, and the gesture does NOT survive the
-    // `runtime.sendMessage` hop that brings us here from the popup — calling
-    // request() in the background page throws "permissions.request may only
-    // be called from a user input handler" for every real user. So the popup
-    // does the asking from its own click handler and the background only
-    // verifies.
-    //
-    // The pattern is the host WITHOUT the port, and must stay byte-identical
-    // to the one the popup requests. Firefox match patterns have no port
-    // component (bug 1362809): `https://host:8443/*` is not a tighter
-    // pattern, it is an invalid one that this call rejects outright, so a
-    // self-hosted server on a non-standard port would be impossible to set
-    // up. The grant is still one host and nothing else.
-    const granted = await browser.permissions.contains({
-      origins: [`https://${parsed.hostname}/*`],
-    });
-    if (!granted) throw new HostPermissionDeniedError(parsed.origin);
 
     const deviceId = crypto.randomUUID();
     // InvalidCredentialsError and everything else propagate untouched from

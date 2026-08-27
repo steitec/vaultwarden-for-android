@@ -90,7 +90,6 @@ beforeEach(() => {
       }),
     },
     tabs: { query: () => Promise.resolve([]) },
-    permissions: { request: () => Promise.resolve(true) },
   });
 });
 

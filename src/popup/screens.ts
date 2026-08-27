@@ -91,20 +91,6 @@ export type SetupValues = {
   email: string;
   password: string;
   pin: string;
-  /**
-   * The match pattern for exactly the entered server's host — computed here
-   * so the caller's handler can reach `browser.permissions.request()` without
-   * parsing anything first. See `renderSetup` for why that matters down to
-   * the statement.
-   *
-   * Host only, never `origin`: Firefox match patterns have no port component
-   * (bug 1362809), so `https://host:8443/*` is not a narrower pattern, it is
-   * an invalid one that `permissions.request()` rejects outright — which
-   * would make a Vaultwarden on a non-standard port impossible to set up. A
-   * portless host pattern is what Firefox accepts, and it must be identical
-   * to the one `Controller.setup` checks with `permissions.contains()`.
-   */
-  originPattern: string;
 };
 
 export type SetupPrefill = {
@@ -123,13 +109,13 @@ const NEW_PREFILL: SetupPrefill = { mode: "new", serverUrl: "", email: "" };
 /**
  * The master-password sign-in form.
  *
- * The submit listener is deliberately NOT async and does not await anything
- * before calling `onSubmit`. Firefox grants `permissions.request()` only
- * while a user-input handler is still on the stack, and the caller's handler
- * asks for the host permission as its first act; one `await` here — even
- * `await Promise.resolve()` — spends the gesture and every real sign-in is
- * refused. The pre-checks below are therefore all synchronous, and so is the
- * URL parse that produces `originPattern`.
+ * The submit listener is not async and awaits nothing before calling
+ * `onSubmit`. That was once load-bearing: the caller asked for the host
+ * permission as its first act, and one `await` here — even
+ * `await Promise.resolve()` — would spend the user gesture Firefox requires
+ * for `permissions.request()` and refuse every real sign-in. The required
+ * https wildcard retired that call (§ F-3), so the constraint is gone; the
+ * pre-checks stay synchronous because they have nothing to wait for.
  */
 export function renderSetup(
   container: HTMLElement,
@@ -216,9 +202,6 @@ export function renderSetup(
       email: address,
       password: masterPassword,
       pin: chosenPin,
-      // The single configured host, never the manifest's wildcard. See
-      // `SetupValues.originPattern` for why the port is left out.
-      originPattern: `https://${parsed.hostname}/*`,
     })
       .catch((e: unknown) => {
         err.textContent = errorText(e);

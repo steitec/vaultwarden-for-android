@@ -206,23 +206,6 @@ function makeHarness(initial: StoredState | null = null): Harness {
   };
 }
 
-/**
- * Stubs the WebExtension surface setup() touches.
- *
- * Only `permissions.contains` is stubbed, and deliberately so: `request()`
- * may only be called from a user input handler, which the background page
- * never has, so a background-side call to it must fail loudly here rather
- * than be quietly satisfied by a stub.
- */
-function stubBrowser(grant: boolean | Error = true) {
-  const contains = vi.fn(async (_p: unknown) => {
-    if (grant instanceof Error) throw grant;
-    return grant;
-  });
-  vi.stubGlobal("browser", { permissions: { contains } });
-  return { contains };
-}
-
 beforeEach(() => vi.unstubAllGlobals());
 afterEach(() => vi.unstubAllGlobals());
 
@@ -231,7 +214,6 @@ describe("Controller.setup", () => {
     const a = await account();
     const userKey: SymKey = { encKey: a.userKeyRaw.slice(0, 32), macKey: a.userKeyRaw.slice(32) };
     await stubServer({ vault: () => vaultWith("GitHub", userKey) });
-    stubBrowser();
 
     const h = makeHarness();
     await h.controller.init();
@@ -260,7 +242,6 @@ describe("Controller.setup", () => {
 
   it("never persists the master password or a raw token", async () => {
     await stubServer({ refreshToken: "the-refresh-token" });
-    stubBrowser();
     const h = makeHarness();
     await h.controller.init();
     await h.controller.setup({ serverUrl: SERVER, email: "a@b.com", password: PASSWORD, pin: PIN });
@@ -280,81 +261,9 @@ describe("Controller.setup", () => {
     ).resolves.toBe("the-refresh-token");
   }, 30000);
 
-  it("checks host access for the configured origin alone, before any network call", async () => {
-    // The manifest cannot name a runtime-determined origin, so it declares
-    // a pattern; the extension must only ever hold the single origin the
-    // user configured. Checking it before the first request also means a
-    // missing grant leaks nothing to the server.
-    //
-    // This is `contains`, not `request`: Firefox refuses request() outside a
-    // user input handler and the gesture does not cross runtime.sendMessage,
-    // so the popup asks and the background verifies.
-    const server = await stubServer();
-    const { contains } = stubBrowser(true);
-    const h = makeHarness();
-    await h.controller.init();
-
-    await h.controller.setup({
-      serverUrl: "https://v.example.net/vault/",
-      email: "a@b.com",
-      password: PASSWORD,
-      pin: PIN,
-    });
-
-    expect(contains).toHaveBeenCalledTimes(1);
-    expect(contains).toHaveBeenCalledWith({ origins: ["https://v.example.net/*"] });
-    expect(server.calls.length).toBeGreaterThan(0);
-    // Ordering: the permission call resolved before the first fetch. The
-    // spy's invocationCallOrder is the reliable witness for that.
-    const firstFetch = vi.mocked(fetch).mock.invocationCallOrder[0]!;
-    expect(contains.mock.invocationCallOrder[0]!).toBeLessThan(firstFetch);
-  }, 30000);
-
-  it("drops the port from the checked origin, because Firefox rejects one", async () => {
-    // Firefox match patterns have no port component at all (bug 1362809) --
-    // `https://v.example.net:8443/*` is not a narrower pattern, it is an
-    // INVALID one, and permissions.contains/request throw on it. So a
-    // self-hosted Vaultwarden on a non-standard port could never be set up.
-    // A portless host pattern is what Firefox accepts, and it already covers
-    // every port on that host; the host is still the only thing this add-on
-    // is ever granted.
-    await stubServer();
-    const { contains } = stubBrowser(true);
-    const h = makeHarness();
-    await h.controller.init();
-
-    await h.controller.setup({
-      serverUrl: "https://v.example.net:8443",
-      email: "a@b.com",
-      password: PASSWORD,
-      pin: PIN,
-    });
-
-    expect(contains).toHaveBeenCalledWith({ origins: ["https://v.example.net/*"] });
-  }, 30000);
-
-  it("aborts without contacting the server when host access has not been granted", async () => {
-    const server = await stubServer();
-    stubBrowser(false);
-    const h = makeHarness();
-    await h.controller.init();
-
-    await expect(
-      h.controller.setup({ serverUrl: SERVER, email: "a@b.com", password: PASSWORD, pin: PIN }),
-    ).rejects.toThrow(/permission/i);
-
-    // Not one byte left the device: no prelogin, no token request, nothing.
-    expect(server.calls).toEqual([]);
-    expect(fetch).not.toHaveBeenCalled();
-    expect(h.stored()).toBeNull();
-    expect(h.controller.status().state).toBe("empty");
-    expect(h.session.userKey).toBeNull();
-  }, 30000);
-
-  it("refuses a non-https server url outright, without checking permission", async () => {
+  it("refuses a non-https server url outright, before anything leaves the device", async () => {
     // A master password must never be posted over plain http.
     const server = await stubServer();
-    const { contains } = stubBrowser(true);
     const h = makeHarness();
     await h.controller.init();
 
@@ -371,7 +280,6 @@ describe("Controller.setup", () => {
       ).rejects.toThrow(/https/i);
     }
 
-    expect(contains).not.toHaveBeenCalled();
     expect(server.calls).toEqual([]);
     expect(h.stored()).toBeNull();
   }, 30000);
@@ -384,7 +292,6 @@ describe("Controller.setup", () => {
     // here are the server's answer, which is why the fixture uses a list a
     // hardcoded [0, 1] could not produce.
     await stubServer({ token: { status: 400, body: { TwoFactorProviders: [1] } } });
-    stubBrowser();
     const h = makeHarness();
     await h.controller.init();
 
@@ -402,7 +309,6 @@ describe("Controller.setup", () => {
 
   it("answers a completed login with a plain ok", async () => {
     await stubServer();
-    stubBrowser();
     const h = makeHarness();
     await h.controller.init();
 
@@ -417,7 +323,6 @@ describe("Controller.setup", () => {
     // prompt at the popup and would render a code box for an account that
     // has no second factor.
     await stubServer({ token: { status: 400, body: { error: "invalid_grant" } } });
-    stubBrowser();
     const h = makeHarness();
     await h.controller.init();
 
@@ -428,7 +333,6 @@ describe("Controller.setup", () => {
 
   it("surfaces bad credentials field-agnostically and stores nothing", async () => {
     await stubServer({ token: { status: 400, body: { error: "invalid_grant" } } });
-    stubBrowser();
     const h = makeHarness();
     await h.controller.init();
 
@@ -447,7 +351,6 @@ describe("Controller.setup", () => {
 
   it("forwards a second factor on the retry", async () => {
     const server = await stubServer();
-    stubBrowser();
     const h = makeHarness();
     await h.controller.init();
 
@@ -468,7 +371,6 @@ describe("Controller.setup", () => {
     // left unlocked with resident keys over an account that was never
     // written. Nothing to lock, nothing to sync — it is still "empty".
     await stubServer();
-    stubBrowser();
     const h = makeHarness();
     await h.controller.init();
     h.failNextSave();
@@ -486,7 +388,6 @@ describe("Controller.setup", () => {
 
   it("rejects a too-short PIN before writing anything", async () => {
     await stubServer();
-    stubBrowser();
     const h = makeHarness();
     await h.controller.init();
 
@@ -504,7 +405,6 @@ describe("Controller.setup", () => {
     // already unlocked) must not orphan the first key's buffer with live
     // vault-key bytes still in it.
     await stubServer();
-    stubBrowser();
     const h = makeHarness();
     await h.controller.init();
 
@@ -536,7 +436,6 @@ describe("Controller.setup", () => {
     // satisfies the restart policy, so PIN unlock must be available again
     // without restarting Firefox.
     await stubServer();
-    stubBrowser();
     const h = makeHarness();
     await h.controller.init();
     await h.controller.setup({ serverUrl: SERVER, email: "a@b.com", password: PASSWORD, pin: PIN });
@@ -552,7 +451,6 @@ describe("Controller.setup", () => {
 describe("Controller.syncNow", () => {
   async function setUpController(vault?: () => unknown): Promise<Harness & { server: FakeServer }> {
     const server = await stubServer({ vault });
-    stubBrowser();
     const h = makeHarness();
     await h.controller.init();
     await h.controller.setup({ serverUrl: SERVER, email: "a@b.com", password: PASSWORD, pin: PIN });
@@ -561,7 +459,6 @@ describe("Controller.syncNow", () => {
 
   it("refuses to sync while locked", async () => {
     await stubServer();
-    stubBrowser();
     const h = makeHarness();
     await h.controller.init();
     await expect(h.controller.syncNow()).rejects.toThrow(/locked/i);
