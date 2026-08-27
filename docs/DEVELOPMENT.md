@@ -496,6 +496,14 @@ gesture.
   scrolled behind the sticky menu → readout shows `NAV#menu` at the upper
   corners and `display=[none]`. Menu closed → badge back in the field.
 
+  **Then tap it.** A badge that is drawn again is not yet a badge that works
+  again, and only the tap tells the two apart: the round trip could return a
+  picture of a control whose listener went with the hide. jsdom covers the
+  same sequence (`tests/content/badge.test.ts`, "still fills after the menu
+  has covered its field and gone away again"), but it dispatches a click at a
+  hidden element as readily as at a visible one, so what a finger can actually
+  reach is a device question.
+
   **`elementsFromPoint` returns the whole stack at a point** — topmost first,
   and everything underneath it after, covered or not. A field behind an open
   menu is still in that list, which is why only the FIRST entry answers "what

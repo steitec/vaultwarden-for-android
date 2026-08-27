@@ -316,6 +316,44 @@ describe("the badge shows itself only where its field is visible", () => {
 
     expect(host().style.display).toBe("none");
   });
+
+  it("still fills after the menu has covered its field and gone away again", () => {
+    // The whole reported sequence on login.example.com, end to end: the
+    // hamburger menu opens, which pushes the form down and paints over it,
+    // and then the user closes it again. Hiding the badge is only half of
+    // what has to happen — it has to come back as a working control, not as
+    // a picture of one.
+    //
+    // What this can and cannot prove: the display assertion is what says a
+    // finger could reach the badge, because jsdom dispatches a click at a
+    // hidden element as readily as at a visible one. The tap assertion says
+    // the listener survived the round trip — which is what a future change
+    // that unmounts the badge while it is covered, and mounts a fresh one
+    // afterwards, would break.
+    const resize = fakeResizeObserver();
+    const field = passwordField();
+    placeField(field, 500);
+    const onTap = vi.fn();
+    mountBadge(field, "fill", onTap);
+
+    // Menu open: the header grew, so the field moved down and is covered.
+    placeField(field, 780);
+    stackAtBadge(host(), document.createElement("nav"), field);
+    resize.fire();
+    expect(host().style.display).toBe("none");
+
+    // Menu closed: the field is back where it was, and clear again.
+    placeField(field, 500);
+    stackAtBadge(host(), field);
+    resize.fire();
+
+    expect(host().style.display).not.toBe("none");
+    expect(host().style.top).toBe(expectedTop(500));
+
+    tapBadge();
+    expect(onTap).toHaveBeenCalledTimes(1);
+  });
+
 });
 
 describe("the badge's glyph", () => {
