@@ -72,7 +72,6 @@ beforeEach(() => {
   vi.stubGlobal("browser", {
     runtime: { sendMessage: vi.fn((req: unknown) => Promise.resolve(responder(req))) },
     tabs: { query: () => Promise.resolve([]) },
-    permissions: { request: () => Promise.resolve(true) },
   });
 });
 
