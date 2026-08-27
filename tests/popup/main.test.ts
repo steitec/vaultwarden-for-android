@@ -92,7 +92,6 @@ function item(id: string, name: string, undecryptable = false): Item {
 type Responder = (req: unknown) => unknown;
 
 let sendMessage: ReturnType<typeof vi.fn>;
-let permissionsRequest: ReturnType<typeof vi.fn>;
 let closeSpy: ReturnType<typeof vi.spyOn>;
 
 /**
@@ -111,14 +110,12 @@ function activeTabHasUrl(): boolean {
 }
 
 /** Installs the `browser` global the popup talks to. */
-function install(responder: Responder, tabs: unknown[], grant = true): void {
+function install(responder: Responder, tabs: unknown[]): void {
   installedTabs = tabs;
   sendMessage = vi.fn((req: unknown) => Promise.resolve(responder(req)));
-  permissionsRequest = vi.fn(() => Promise.resolve(grant));
   vi.stubGlobal("browser", {
     runtime: { sendMessage },
     tabs: { query: () => Promise.resolve(tabs) },
-    permissions: { request: permissionsRequest },
   });
 }
 
@@ -313,40 +310,6 @@ describe("routing", () => {
 });
 
 describe("setup", () => {
-  it("asks for the host permission while the tap is still a tap", async () => {
-    // Firefox only honours permissions.request() during the synchronous run
-    // of a user input handler. A single `await` anywhere before it — even
-    // `await Promise.resolve()` — and every real user gets a refusal. Hence
-    // no await in this assertion either: if request() has not happened by
-    // the time dispatchEvent returns, it happened too late.
-    install(defaultResponder({ status: () => EMPTY }), []);
-    await main();
-    fillSetup();
-    submitForm(requireEl("root"));
-
-    expect(permissionsRequest).toHaveBeenCalledWith({
-      origins: ["https://vault.example.net/*"],
-    });
-  });
-
-  it("asks for the configured host alone, never the manifest wildcard", async () => {
-    // The path is dropped, and so is the port: Firefox match patterns have no
-    // port component (bug 1362809), so `https://vault.example.net:8443/*` is
-    // not a tighter pattern but an INVALID one that permissions.request
-    // throws on — a self-hosted server on a non-standard port could never be
-    // set up. The host is still the whole of the grant, and it must match the
-    // pattern Controller.setup verifies with permissions.contains().
-    install(defaultResponder({ status: () => EMPTY }), []);
-    await main();
-    fillSetup({ server: "https://vault.example.net:8443/vault/" });
-    submitForm(requireEl("root"));
-
-    expect(permissionsRequest).toHaveBeenCalledTimes(1);
-    expect(permissionsRequest).toHaveBeenCalledWith({
-      origins: ["https://vault.example.net/*"],
-    });
-  });
-
   it("sends the setup message and re-routes into the vault without reloading", async () => {
     // Re-routing, not location.reload(): a reload throws the panel away and
     // starts a second popup lifetime, and there is nothing to prove it
@@ -378,27 +341,34 @@ describe("setup", () => {
     expect(sentOf("status")).toHaveLength(2);
   });
 
-  it("stops at a declined permission and names the origin, without contacting the background", async () => {
-    install(defaultResponder({ status: () => EMPTY }), [], false);
-    await main();
-    fillSetup();
-    submitForm(requireEl("root"));
-
-    await vi.waitFor(() =>
-      expect(one(requireEl("root"), ".error").textContent).toContain("https://vault.example.net"),
-    );
-    expect(sentKinds()).not.toContain("setup");
-  });
-
-  it("never asks for a permission for a url it will not use", async () => {
+  it("refuses a non-https server without contacting the background at all", async () => {
+    // The popup's own pre-check. setup() refuses it a second time, but a
+    // master password must not cross even the internal message boundary on
+    // its way to an address it will not be sent to.
     install(defaultResponder({ status: () => EMPTY }), []);
     await main();
     fillSetup({ server: "http://vault.example.net" });
     submitForm(requireEl("root"));
     await Promise.resolve();
 
-    expect(permissionsRequest).not.toHaveBeenCalled();
     expect(sentKinds()).not.toContain("setup");
+  });
+
+  it("signs in against a server on a non-standard port, path and all", async () => {
+    // This used to be a permissions test: the host pattern had to lose the
+    // port, because Firefox match patterns have no port component (bug
+    // 1362809) and `https://host:8443/*` is invalid rather than narrower.
+    // The grant is gone (§ F-3) and the port is not, so what is left worth
+    // pinning is that such a server still reaches setup intact.
+    install(defaultResponder({ status: () => EMPTY }), []);
+    await main();
+    fillSetup({ server: "https://vault.example.net:8443/vault/" });
+    submitForm(requireEl("root"));
+
+    await vi.waitFor(() => expect(sentKinds()).toContain("setup"));
+    expect(sentOf("setup")[0]).toMatchObject({
+      serverUrl: "https://vault.example.net:8443/vault/",
+    });
   });
 
   it("renders the server's two-factor providers, not a hardcoded pair", async () => {
@@ -459,9 +429,6 @@ describe("setup", () => {
       pin: "135790",
       twoFactor: { token: "123456", provider: 0 },
     });
-    // Exactly one grant: the second call runs on the permission the first
-    // one obtained.
-    expect(permissionsRequest).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the two-factor screen up when the code is refused", async () => {
@@ -684,7 +651,6 @@ describe("failure handling", () => {
     vi.stubGlobal("browser", {
       runtime: { sendMessage },
       tabs: { query: () => Promise.resolve([]) },
-      permissions: { request: () => Promise.resolve(true) },
     });
 
     void main();
@@ -704,7 +670,6 @@ describe("failure handling", () => {
     vi.stubGlobal("browser", {
       runtime: { sendMessage },
       tabs: { query: () => Promise.resolve([]) },
-      permissions: { request: () => Promise.resolve(true) },
     });
 
     void main();

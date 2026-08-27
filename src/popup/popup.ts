@@ -619,23 +619,13 @@ export async function main(): Promise<void> {
   /**
    * Hands a completed sign-in form to the background page.
    *
-   * `browser.permissions.request()` is the FIRST statement, before any
-   * await, and the form calls this synchronously from its submit listener.
-   * Firefox only honours the call while the user-input handler is still on
-   * the stack, and the gesture does not survive `runtime.sendMessage` — so
-   * the background page verifies the grant with `contains()` and this is the
-   * only place that can ask for it. `originPattern` was built by the form's
-   * synchronous pre-check for exactly this reason.
+   * This used to open with `browser.permissions.request()` for the entered
+   * host, from inside the form's own submit gesture. The broad https wildcard
+   * is a required permission now, so that call had nothing left to ask for
+   * and resolved true without a prompt every time — see § F-3 of
+   * `docs/VERIFICATION-2026-08-25.md`.
    */
   async function submitSetup(v: SetupValues): Promise<void> {
-    const granted = await browser.permissions.request({ origins: [v.originPattern] });
-    if (!granted) {
-      throw new Error(
-        `This add-on needs your permission to contact ${v.originPattern.replace(/\/\*$/, "")}. ` +
-          "Sign-in cannot continue without it.",
-      );
-    }
-
     const first = await requestSetup({
       kind: "setup",
       serverUrl: v.serverUrl,
