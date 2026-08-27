@@ -7,32 +7,17 @@ already lives somewhere — a finding in the verification log, a section in
 `docs/DEVELOPMENT.md` — and the entry here points at it rather than restating
 it. Restating it is how the two versions start disagreeing.
 
-**Nothing below may be built before C3 finishes.** The manual verification run
-is still open and every result so far was taken against the build from `90ee4d6`;
-changing the source now would split the run across two builds and put the
-earlier results in question. See `docs/VERIFICATION-2026-08-25.md`.
+The manual verification run of 2026-08-25 is **finished** — 22 of 25 passed,
+nothing failing, A1 and A2 blocked on 2.1 below. All three defects it found (F-2,
+F-4, F-5) are fixed, confirmed on the device, and merged to `main`, so the source
+is no longer frozen and anything here may be picked up. The run itself is in
+`docs/VERIFICATION-2026-08-25.md`.
 
 ---
 
 ## 1. Before the private install
 
-### 1.1 Fix the PIN lockout warning (F-2) — **the one real defect**
-
-The pad never shows "N attempts remaining", so a user spends all five attempts
-with no notice and loses their PIN. The counting and the enforcement are correct;
-the defect is entirely in the popup's render path.
-
-Root cause, the exact three call sites, and a **finished regression test** are in
-`docs/VERIFICATION-2026-08-25.md` § F-2. Drop the test in as
-`tests/popup/lockout-warning.test.ts` with the fix — it is deliberately not
-committed yet, because it would leave the suite red until then.
-
-Afterwards, re-run **C4 alone** on the rebuilt version. Only the middle column of
-its table needs confirming; the enforcement column already passed on 2026-08-26.
-Each reading has to happen without closing the popup — reopening it is exactly
-what hides the bug.
-
-### 1.2 Badge icon: a lock and a key, not two locks
+### 1.1 Badge icon: a lock and a key, not two locks
 
 Decided 2026-08-26. `src/content/badge.ts:20-24` uses `\u{1F512}` (🔒) for both
 `fill` and `chooser`, and `\u{1F513}` (🔓) for `unlock`. The two differ only in
@@ -57,22 +42,24 @@ glyph, so the badge does not distinguish "one entry, tapping fills it" from
 "several entries, tapping opens a chooser". That may well be right — the tap is
 safe either way — but it is a choice, not an accident, and nothing records it.
 
+### 1.2 Measure the idle lock over a long idle, and decide about `browser.alarms`
+
+Measured 2026-08-26, screen off and on battery: the fifteen-minute idle lock
+fired, but **59 seconds late**, and it landed the instant the device woke. So
+`setTimeout` is not lost — the worst case does not happen — but it is throttled.
+
+Fifteen minutes is short for Android's power management; Doze deepens with longer
+stillness. A phone left overnight has not been measured, and the lateness there
+could be far larger. The rig for it exists: branch `debug/f4-idle-lock` plus the
+loopback beacon, and `lateByMs` is computed from the wall clock, so it stays
+honest however late the beacon itself arrives.
+
+If a long idle is much worse, the fix is `browser.alarms`, which is designed to
+survive suspension and needs the `alarms` permission. That is a larger change
+than either fix this run produced, which is why it is a measurement first and a
+decision second. Full trail in `docs/VERIFICATION-2026-08-25.md` § F-4.
+
 ---
-
-### 1.4 An open popup keeps showing the vault after it locks (F-5)
-
-Found 2026-08-26. The idle timer fired and the background locked — both beaconed
-— while the panel on screen went on showing the entry list. Reopening it gave the
-PIN pad, so the session was genuinely locked and the panel was stale.
-
-Nothing tells the popup a lock happened: no message, no port, no listener. What
-stays readable is entry names and usernames; passwords never cross to the popup
-and filling now fails with `LockedError`, so this is the account list, not the
-secrets.
-
-It matters because it is exactly the idle-lock scenario — the panel is open,
-which is why the phone got put down in the first place. Fix direction and the
-test it needs are in `docs/VERIFICATION-2026-08-25.md` § F-5.
 
 ## 2. Before anything is submitted to AMO
 
@@ -157,6 +144,15 @@ eventually be somebody's bug report. Full write-ups in `docs/DEVELOPMENT.md` →
 
 ---
 
+## 4. Deferred to v2
+
+Unchanged and still just a list, kept in `docs/DEVELOPMENT.md` → "Deferred to
+v2": item creation and editing, save-password prompts, Sends and attachments,
+card and identity types, passkeys, multiple accounts, WebSocket push sync, a full
+public suffix list, and a TOTP display in the popup.
+
+---
+
 ## 5. Traps for a future verification run
 
 Not work to be done — things that have already cost time, or nearly did, and
@@ -195,27 +191,3 @@ would cost it again.
 - **Extension `console.log` does not reach `adb logcat`** on Fenix. Verified
   2026-08-26 with zero hits. Diagnostics need another channel; the loopback
   beacon on `debug/f4-idle-lock` is one that works.
-
-### 1.3 Measure the idle lock over a long idle, and decide about `browser.alarms`
-
-Measured 2026-08-26, screen off and on battery: the fifteen-minute idle lock
-fired, but **59 seconds late**, and it landed the instant the device woke. So
-`setTimeout` is not lost — the worst case does not happen — but it is throttled.
-
-Fifteen minutes is short for Android's power management; Doze deepens with longer
-stillness. A phone left overnight has not been measured, and the lateness there
-could be far larger. The rig for it exists: branch `debug/f4-idle-lock` plus the
-loopback beacon, and `lateByMs` is computed from the wall clock, so it stays
-honest however late the beacon itself arrives.
-
-If a long idle is much worse, the fix is `browser.alarms`, which is designed to
-survive suspension and needs the `alarms` permission. That is a larger change
-than either fix this run produced, which is why it is a measurement first and a
-decision second. Full trail in `docs/VERIFICATION-2026-08-25.md` § F-4.
-
-## 4. Deferred to v2
-
-Unchanged and still just a list, kept in `docs/DEVELOPMENT.md` → "Deferred to
-v2": item creation and editing, save-password prompts, Sends and attachments,
-card and identity types, passkeys, multiple accounts, WebSocket push sync, a full
-public suffix list, and a TOTP display in the popup.
