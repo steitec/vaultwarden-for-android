@@ -575,9 +575,9 @@ in which case it is cheaper to fix, rebuild, and re-run C4 alone.
 
 ### Next action: the run is done; what is left is decisions
 
-Every one of the 25 items has an outcome and nothing is failing. Both defects
-this run found were fixed and both fixes were confirmed on the device, not only
-in the suite:
+Every one of the 25 items has an outcome and nothing is failing. All three
+defects this run found were fixed and every fix was confirmed on the device, not
+only in the suite:
 
 - **F-4** — `matchesFor` no longer extends the idle timer. C3 re-run passed with
   the login page reloaded and open throughout, which is the condition that broke
@@ -585,19 +585,22 @@ in the suite:
 - **F-2** — the PIN pad re-renders its warning after every rejected attempt. C4
   re-run showed 3, 2, 1 in order beside "Incorrect PIN", then 0, then the refusal.
 
-The fixes sit on `fix/f4-idle-timer` and `fix/f2-lockout-warning` (the second
-stacked on the first) and have not been merged.
+- **F-5** — an open popup is told when the vault locks, over a port the
+  background posts on from the `session.onLock` hook. The panel changed itself to
+  the PIN pad while left open and untouched.
+
+All three are merged to `main`.
 
 What remains is not verification work:
 
 1. **F-3** needs a decision — keep the required `https://*/*` or return to a
    per-host grant. A1 and A2 stay blocked until it is answered, and
    `docs/AMO-SUBMISSION.md` contradicts itself until it is acted on.
-2. **H2 is still unmeasured.** `setTimeout` does not survive process suspension
-   and there is no `browser.alarms` fallback, so the idle lock has never been
-   tested with the screen off — the case a phone in a pocket actually presents.
-   Every C3 run so far kept the screen on deliberately. The beacon rig on
-   `debug/f4-idle-lock` is what that experiment needs.
+2. **H2 is measured for fifteen minutes and no longer.** Screen off and on
+   battery, the idle lock fired 59 seconds late — throttled, not lost. A phone
+   left overnight has not been measured, and `browser.alarms` is the fix if a
+   long idle behaves worse. The beacon rig on `debug/f4-idle-lock` is what that
+   experiment needs.
 3. **The rest of `docs/BACKLOG.md`**, in its own order.
 
 ### Blocked on preparation
@@ -638,8 +641,9 @@ The panel will open on the vault list, or on the PIN pad once C3's idle timer ha
 run. This is no longer the throwaway account from the earlier session — treat the
 device as holding live credentials, and sign out when the run is finished.
 
-Source is unchanged since the run began — the build under test is still 90ee4d6,
-and every commit since has been documentation.
+The run began against the build from 90ee4d6. It no longer runs on that build: the
+F-4, F-2 and F-5 fixes were made after the checklist finished, each re-verified
+on the device, and all three are merged to `main`. Rebuild before anything else.
 
 ```bash
 export PATH="$HOME/Android/Sdk/platform-tools:$PATH"
@@ -671,12 +675,10 @@ Three things that cost time and need not cost it again:
   (`grep -c '^\s*- \[x\]'` and friends), never by incrementing the previous
   number.
 
-### Open decisions, neither of them urgent for a private install
+### The one decision left
 
-- **F-2** (the lockout warning) is unfixed. The recommendation on the table, not
-  yet answered: finish the checklist on this build, then fix, then re-run C4
-  alone. The regression test is written and sits inside F-2 above.
 - **F-3** (the required `https://*/*`) needs a decision between keeping the broad
-  install-time grant and returning to a per-host one. Whichever way it goes,
-  `docs/AMO-SUBMISSION.md` has to stop contradicting itself before anything is
-  submitted.
+  install-time grant and returning to a per-host one. A1 and A2 stay blocked
+  until it is answered, and `docs/AMO-SUBMISSION.md` contradicts itself until it
+  is acted on. Nothing else in this log is outstanding: F-2, F-4 and F-5 are all
+  fixed, confirmed on the device, and merged.
