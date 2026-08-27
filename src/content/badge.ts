@@ -17,16 +17,95 @@ const LABEL: Record<BadgeMode, string> = {
   unlock: "Unlock Vaultwarden to fill",
 };
 
-const GLYPH: Record<BadgeMode, string> = {
-  fill: "\u{1F512}",
-  chooser: "\u{1F512}",
-  unlock: "\u{1F513}",
-};
-
 const SIZE_PX = 24;
+
+/** The drawn glyph, inside the badge's box. */
+const GLYPH_PX = 16;
 
 /** How far the badge sits inside the field's right-hand edge. */
 const INSET_PX = 4;
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/** One drawn shape: an element name, and the attributes that give it form. */
+type Shape = [tag: string, attrs: Record<string, string>];
+
+/**
+ * The lock, shared by the two modes that mean "the vault has an entry here".
+ *
+ * Centred on x=7 rather than x=8, which is what leaves the chooser room for
+ * its marker without redrawing the lock — the two must stay the same shape.
+ */
+const LOCK: Shape[] = [
+  ["rect", { x: "2.5", y: "7", width: "9", height: "6.25", rx: "1.25" }],
+  ["path", { d: "M4.75 7V5.25a2.25 2.25 0 0 1 4.5 0V7" }],
+];
+
+/**
+ * The vertical ellipsis Android uses for an overflow menu.
+ *
+ * A chooser tap cannot finish on the page — it hands off to the popup, which
+ * `browserAction.openPopup()` cannot raise on Firefox for Android, so nothing
+ * visible happens and the user has to open the add-on. That is the one place
+ * the badge can mislead, and it is why chooser is not simply the fill lock.
+ */
+const OVERFLOW_DOTS: Shape[] = [5.4, 8, 10.6].map((cy): Shape => [
+  "circle",
+  { cx: "14", cy: String(cy), r: "0.85", fill: "currentColor", stroke: "none" },
+]);
+
+/**
+ * The key: a round bow at the lower left, a shaft to the upper right, two
+ * teeth on its underside.
+ *
+ * Every point on the shaft satisfies x + y = 16, including where it leaves
+ * the bow — that is what keeps the teeth sitting on the shaft rather than
+ * beside it if the numbers are ever adjusted.
+ */
+const KEY: Shape[] = [
+  ["circle", { cx: "5.5", cy: "10.5", r: "2.75" }],
+  ["path", { d: "M7.45 8.55 13 3" }],
+  ["path", { d: "M11 5l1.3 1.3" }],
+  ["path", { d: "M12.3 3.7l1.3 1.3" }],
+];
+
+const GLYPH: Record<BadgeMode, { viewBox: string; shapes: Shape[] }> = {
+  fill: { viewBox: "0 0 14 16", shapes: LOCK },
+  chooser: { viewBox: "0 0 16 16", shapes: [...LOCK, ...OVERFLOW_DOTS] },
+  unlock: { viewBox: "0 0 16 16", shapes: KEY },
+};
+
+/**
+ * Draws the glyph for `mode`.
+ *
+ * Built node by node rather than assigned as markup: a page may enforce
+ * Trusted Types, under which `innerHTML` in a content script throws instead
+ * of rendering, and a badge that throws on some sites is worse than one that
+ * is merely plain. Nothing here is drawn in a colour of its own — the shapes
+ * take `currentColor` from the host, which is what makes the `color` on the
+ * glyph element mean something. It did not, while these were colour emoji:
+ * those are drawn by the device's emoji font, in that font's own colours and
+ * in whatever shapes it happens to have.
+ */
+export function buildGlyph(doc: Document, mode: BadgeMode): SVGSVGElement {
+  const { viewBox, shapes } = GLYPH[mode];
+  const svg = doc.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", viewBox);
+  svg.setAttribute("width", String(GLYPH_PX));
+  svg.setAttribute("height", String(GLYPH_PX));
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "1.5");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+
+  for (const [tag, attrs] of shapes) {
+    const el = doc.createElementNS(SVG_NS, tag);
+    for (const [name, value] of Object.entries(attrs)) el.setAttribute(name, value);
+    svg.appendChild(el);
+  }
+  return svg;
+}
 
 /**
  * Mounts the badge beside `field` and returns its unmount.
@@ -58,9 +137,9 @@ export function mountBadge(
   // reach in and restyle the glyph out of visibility.
   glyph.style.cssText =
     "all:initial;display:flex;align-items:center;justify-content:center;" +
-    `width:${SIZE_PX}px;height:${SIZE_PX}px;font-size:14px;line-height:1;` +
+    `width:${SIZE_PX}px;height:${SIZE_PX}px;` +
     "border-radius:4px;background:#1f2b4d;color:#ffffff;";
-  glyph.textContent = GLYPH[mode];
+  glyph.appendChild(buildGlyph(doc, mode));
   root.appendChild(glyph);
 
   // Capture phase and full suppression. A page that listens for clicks on its
