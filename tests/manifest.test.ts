@@ -63,28 +63,20 @@ describe("manifest", () => {
     expect(script).not.toHaveProperty("all_frames");
   });
 
-  it("declares optional host access as https-only", () => {
-    // MV2 cannot declare a runtime-determined origin, so the user's server
-    // has to be covered by a pattern — but the pattern must not include
-    // plain http. Setup posts the derived master password hash to this
-    // address and every sync carries a bearer token to it; over http both
-    // are readable by anyone on the path. Controller.setup then requests
-    // only the single configured origin at runtime, so a `*://*/*` grant is
-    // never actually held — but it must not be requestable either.
-    expect(manifest.optional_permissions).toEqual(["https://*/*"]);
-
-    // Scoped to optional_permissions rather than the whole manifest: since
-    // the badge landed, `permissions` legitimately contains http loopback
-    // patterns. What must stay https-only is the grant the SERVER origin is
-    // requested under — that is the one carrying the master password hash
-    // and every bearer token.
-    const json = JSON.stringify(manifest.optional_permissions);
-    expect(json).not.toContain("*://*/*");
-    expect(json).not.toContain("http://");
-    expect(json).not.toContain("<all_urls>");
-    for (const p of manifest.optional_permissions) {
-      expect(p.startsWith("https://"), `optional permission ${p} must be https-only`).toBe(true);
-    }
+  it("declares no optional permissions, because nothing is asked for at runtime", () => {
+    // This held ["https://*/*"] until 2026-08-27 — the pattern the popup
+    // requested the single configured server origin under. `permissions`
+    // requires that same wildcard at install time, so the request could only
+    // ever resolve true without a prompt, and it is gone (§ F-3 of
+    // docs/VERIFICATION-2026-08-25.md).
+    //
+    // An optional permission that is already required asks for nothing and
+    // grants nothing. Leaving it declared tells a reviewer that some access
+    // is deferred to a runtime prompt, which is exactly the claim that is no
+    // longer true. What it used to protect — that the server origin is only
+    // ever reachable over https — is now held by the exact-array assertion
+    // on `permissions` above, together with the loopback test below.
+    expect(manifest).not.toHaveProperty("optional_permissions");
   });
 
   it("declares that it collects no data at all", () => {

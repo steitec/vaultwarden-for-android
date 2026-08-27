@@ -219,11 +219,12 @@ function isFillMessage(v: unknown): v is FillMessage {
   return true;
 }
 
-// Injected on demand by the background page, which then sends the credentials.
+// Declared statically in manifest.json and running on every matched page; the
+// background page sends the credentials to it by tab id.
 //
-// Page JavaScript cannot reach this listener under MV2 -- content scripts
-// and pages are isolated worlds, and this listener is never registered
-// statically (see manifest.json's absent content_scripts).
+// Page JavaScript cannot reach this listener under MV2 -- content scripts and
+// pages are isolated worlds, so being present on every page does not make it
+// reachable from one.
 //
 // The sender check is defence in depth. An earlier version of this comment
 // claimed it closes a hole through which a *different installed extension*
