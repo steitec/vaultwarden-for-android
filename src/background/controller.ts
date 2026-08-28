@@ -147,6 +147,10 @@ export class Controller {
   }
 
   status(): Status {
+    // First, before anything reads the session. A panel that opens onto an
+    // unlocked-looking vault whose every action then fails is F-5 wearing
+    // different clothes.
+    this.session.lockIfExpired();
     // Read `settings` once: it returns a fresh defensive clone on every
     // access, so two reads are two allocations and are not identical.
     const s = this.session.settings;
@@ -323,6 +327,14 @@ export class Controller {
   }
 
   private async syncAttempt(mayRetry: boolean): Promise<void> {
+    // Like matchesFor, this method tests session.state itself instead of
+    // going through require(), so it must settle the deadline itself too —
+    // otherwise a session that expired while nothing else touched it reads
+    // as "unlocked" here and this mints a fresh refresh token and reaches
+    // the network on an expired vault. Placed first so the retry re-entry
+    // below (mayRetry: false) is covered by the same call.
+    this.session.lockIfExpired();
+
     // One read: `settings` returns a fresh clone per access. Writes go
     // through session.update() — assigning to this clone would persist
     // nothing and the vault would silently serve a stale cache forever.
@@ -418,6 +430,11 @@ export class Controller {
    * rather than inferring it means a new caller has to state which it is.
    */
   private require(intent: "user" | "page"): VaultItem[] {
+    // Settle expiry BEFORE the state test, so an expired session is
+    // indistinguishable from a locked one to every caller. The idle lock is a
+    // deadline rather than a timer precisely because nothing can be relied on
+    // to fire on a sleeping device; this is where the deadline is read.
+    this.session.lockIfExpired();
     if (this.session.state !== "unlocked") throw new LockedError();
     if (intent === "user") this.session.touch();
     return this.items;
@@ -508,6 +525,12 @@ export class Controller {
    * matches" — the first renders an unlock badge, the second renders nothing.
    */
   async matchesFor(pageUrl: string | undefined): Promise<PageMatches> {
+    // Settle expiry first: this method reads session.state directly and
+    // returns on two paths before require() is reached, so the deadline must
+    // be settled here too. Without it the content script gets no badge on the
+    // first call after expiry — the page either sees "unlocked" or sees an
+    // exception that gets swallowed.
+    this.session.lockIfExpired();
     if (this.session.state !== "unlocked") return { state: "locked" };
     if (pageUrl === undefined) return { state: "unlocked", items: [] };
     return { state: "unlocked", items: matchItems(this.require("page"), pageUrl).map(summarize) };
