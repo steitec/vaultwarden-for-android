@@ -17,22 +17,36 @@ is no longer frozen and anything here may be picked up. The run itself is in
 
 ## 1. Before the private install
 
-### 1.1 Measure the idle lock over a long idle, and decide about `browser.alarms`
+### 1.1 Replace the idle lock's `setTimeout` with `browser.alarms`
 
-Measured 2026-08-26, screen off and on battery: the fifteen-minute idle lock
-fired, but **59 seconds late**, and it landed the instant the device woke. So
-`setTimeout` is not lost — the worst case does not happen — but it is throttled.
+**Measured over a night, 2026-08-27/28, and the measurement decided it.** The
+timeout was stretched to 210 minutes so the deadline would fall in deep Doze.
+Over the eight hours that followed, `setTimeout` never fired: the first
+interaction of the morning found `state=unlocked` with `pendingTimer=true`, four
+and a half hours past the deadline, with no `FIRED` and no `lock()` anywhere in
+between. Firefox never restarted, so nothing took the timer away — it simply did
+not run.
 
-Fifteen minutes is short for Android's power management; Doze deepens with longer
-stillness. A phone left overnight has not been measured, and the lateness there
-could be far larger. The rig for it exists: branch `debug/f4-idle-lock` plus the
-loopback beacon, and `lateByMs` is computed from the wall clock, so it stays
-honest however late the beacon itself arrives.
+This is no longer a question of lateness. The idle lock, which is the add-on's
+only defence against a phone left somewhere, does not happen at all on a device
+that is asleep — which is the one situation it exists for. The 2026-08-26 result
+that read as mild throttling was an artefact of measuring only fifteen minutes.
+Full trail, conditions and the superseded reading in
+`docs/VERIFICATION-2026-08-25.md` § F-4.
 
-If a long idle is much worse, the fix is `browser.alarms`, which is designed to
-survive suspension and needs the `alarms` permission. That is a larger change
-than either fix this run produced, which is why it is a measurement first and a
-decision second. Full trail in `docs/VERIFICATION-2026-08-25.md` § F-4.
+**What it touches.** `alarms` in the manifest; `touch()` and `lock()` in
+`src/session/session.ts`, which currently own a `setTimeout` handle
+(`session.ts:215`, cleared at `session.ts:233`); and a listener, because an alarm
+arrives as an event on the background page rather than as a closure, so the
+route from the alarm back to `Session.lock` has to be built rather than captured.
+The suite drives the current timer with `vi.advanceTimersByTime`, so it needs a
+`browser.alarms` stub before any of this can be written test-first.
+
+**Two things to settle while designing it, not after.** Whether the alarm should
+also survive a browser restart, which changes whether it is re-created at
+`init()`; and whether `docs/AMO-SUBMISSION.md` has to say anything about the new
+permission — § 2.1 already asks for that note to be re-read against the code, and
+this is a change to what the code asks for.
 
 ---
 
