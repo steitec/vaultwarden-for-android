@@ -878,6 +878,39 @@ describe("Controller", () => {
         vi.useRealTimers();
       }
     }, 20000);
+
+    // matchesFor reads session.state directly and returns on two paths before
+    // require() is reached, so the deadline must be settled here too. Without
+    // it, the content script gets no badge on the first call after expiry.
+    it("matchesFor resolves to locked rather than rejecting after the deadline", async () => {
+      vi.useFakeTimers();
+      try {
+        const { controller } = await makeController();
+        await controller.unlock(PIN);
+
+        vi.setSystemTime(Date.now() + 16 * 60 * 1000);
+
+        const answer = await controller.matchesFor("https://github.com");
+        expect(answer).toEqual({ state: "locked" });
+      } finally {
+        vi.useRealTimers();
+      }
+    }, 20000);
+
+    it("matchesFor with undefined url reports locked after the deadline", async () => {
+      vi.useFakeTimers();
+      try {
+        const { controller } = await makeController();
+        await controller.unlock(PIN);
+
+        vi.setSystemTime(Date.now() + 16 * 60 * 1000);
+
+        const answer = await controller.matchesFor(undefined);
+        expect(answer).toEqual({ state: "locked" });
+      } finally {
+        vi.useRealTimers();
+      }
+    }, 20000);
   });
 
   describe("a lock that lands in the middle of a load", () => {

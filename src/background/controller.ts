@@ -517,6 +517,12 @@ export class Controller {
    * matches" — the first renders an unlock badge, the second renders nothing.
    */
   async matchesFor(pageUrl: string | undefined): Promise<PageMatches> {
+    // Settle expiry first: this method reads session.state directly and
+    // returns on two paths before require() is reached, so the deadline must
+    // be settled here too. Without it the content script gets no badge on the
+    // first call after expiry — the page either sees "unlocked" or sees an
+    // exception that gets swallowed.
+    this.session.lockIfExpired();
     if (this.session.state !== "unlocked") return { state: "locked" };
     if (pageUrl === undefined) return { state: "unlocked", items: [] };
     return { state: "unlocked", items: matchItems(this.require("page"), pageUrl).map(summarize) };
