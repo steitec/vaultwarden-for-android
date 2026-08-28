@@ -17,36 +17,20 @@ is no longer frozen and anything here may be picked up. The run itself is in
 
 ## 1. Before the private install
 
-### 1.1 Replace the idle lock's `setTimeout` with `browser.alarms`
+### 1.1 ~~Replace the idle lock's `setTimeout`~~ — done 2026-08-28
 
-**Measured over a night, 2026-08-27/28, and the measurement decided it.** The
-timeout was stretched to 210 minutes so the deadline would fall in deep Doze.
-Over the eight hours that followed, `setTimeout` never fired: the first
-interaction of the morning found `state=unlocked` with `pendingTimer=true`, four
-and a half hours past the deadline, with no `FIRED` and no `lock()` anywhere in
-between. Firefox never restarted, so nothing took the timer away — it simply did
-not run.
+The overnight run of 2026-08-27/28 showed `setTimeout` never fires on a sleeping
+device. The fix is not `browser.alarms`, which Gecko implements with its own
+in-process timers and which a frozen process freezes just the same. The idle
+lock is now a **deadline**, settled at `Controller.require()` and `status()`,
+which cannot fail to fire because nothing has to fire.
 
-This is no longer a question of lateness. The idle lock, which is the add-on's
-only defence against a phone left somewhere, does not happen at all on a device
-that is asleep — which is the one situation it exists for. The 2026-08-26 result
-that read as mild throttling was an artefact of measuring only fifteen minutes.
-Full trail, conditions and the superseded reading in
-`docs/VERIFICATION-2026-08-25.md` § F-4.
+Both questions this entry left open are answered: no persistence is needed,
+because `init()` already locks a session that outlived its background page; and
+no permission is added, so the AMO note in § 2.1 is unaffected by this change.
 
-**What it touches.** `alarms` in the manifest; `touch()` and `lock()` in
-`src/session/session.ts`, which currently own a `setTimeout` handle
-(`session.ts:215`, cleared at `session.ts:233`); and a listener, because an alarm
-arrives as an event on the background page rather than as a closure, so the
-route from the alarm back to `Session.lock` has to be built rather than captured.
-The suite drives the current timer with `vi.advanceTimersByTime`, so it needs a
-`browser.alarms` stub before any of this can be written test-first.
-
-**Two things to settle while designing it, not after.** Whether the alarm should
-also survive a browser restart, which changes whether it is re-created at
-`init()`; and whether `docs/AMO-SUBMISSION.md` has to say anything about the new
-permission — § 2.1 already asks for that note to be re-read against the code, and
-this is a change to what the code asks for.
+Full trail in `docs/VERIFICATION-2026-08-25.md` § F-4; design in
+`docs/superpowers/specs/2026-08-28-idle-lock-deadline-design.md`.
 
 ---
 
