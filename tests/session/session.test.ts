@@ -361,4 +361,78 @@ describe("Session", () => {
     expect(session.userKey!.encKey[0]).toBe(4);
     expect(session.userKey!.macKey[0]).toBe(5);
   }, 20000);
+
+  describe("the idle deadline", () => {
+    // The test the night of 2026-08-27 would have failed. Advancing the system
+    // clock WITHOUT advancing timers is the frozen-process case exactly:
+    // wall-clock time passes, no callback ever runs. See
+    // docs/VERIFICATION-2026-08-25.md § F-4.
+    it("locks on the next check when the deadline passed while nothing ran", async () => {
+      vi.useFakeTimers();
+      try {
+        await session.init();
+        await session.unlockWithPin("135790");
+        expect(session.state).toBe("unlocked");
+
+        vi.setSystemTime(Date.now() + 16 * 60 * 1000);
+        session.lockIfExpired();
+
+        expect(session.state).toBe("locked");
+        expect(session.userKey).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("does not lock while the deadline is still ahead", async () => {
+      vi.useFakeTimers();
+      try {
+        await session.init();
+        await session.unlockWithPin("135790");
+
+        vi.setSystemTime(Date.now() + 14 * 60 * 1000);
+        session.lockIfExpired();
+
+        expect(session.state).toBe("unlocked");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    // A timeout of 0 means "never". A deadline left behind by an earlier
+    // setting would lock a vault the user asked never to lock.
+    it("never expires when the timeout is zero", async () => {
+      saved!.lockTimeoutMinutes = 0;
+      vi.useFakeTimers();
+      try {
+        await session.init();
+        await session.unlockWithPin("135790");
+
+        vi.setSystemTime(Date.now() + 365 * 24 * 60 * 60 * 1000);
+        session.lockIfExpired();
+
+        expect(session.state).toBe("unlocked");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    // A backwards jump pushes the deadline away and would delay the lock, so
+    // it is treated as expiry: the deadline is no longer meaningful, and
+    // locking is the answer that cannot be wrong.
+    it("locks when the clock has moved backwards under the deadline", async () => {
+      vi.useFakeTimers();
+      try {
+        await session.init();
+        await session.unlockWithPin("135790");
+
+        vi.setSystemTime(Date.now() - 60 * 1000);
+        session.lockIfExpired();
+
+        expect(session.state).toBe("locked");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
 });
