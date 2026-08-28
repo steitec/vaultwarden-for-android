@@ -327,6 +327,14 @@ export class Controller {
   }
 
   private async syncAttempt(mayRetry: boolean): Promise<void> {
+    // Like matchesFor, this method tests session.state itself instead of
+    // going through require(), so it must settle the deadline itself too —
+    // otherwise a session that expired while nothing else touched it reads
+    // as "unlocked" here and this mints a fresh refresh token and reaches
+    // the network on an expired vault. Placed first so the retry re-entry
+    // below (mayRetry: false) is covered by the same call.
+    this.session.lockIfExpired();
+
     // One read: `settings` returns a fresh clone per access. Writes go
     // through session.update() — assigning to this clone would persist
     // nothing and the vault would silently serve a stale cache forever.
