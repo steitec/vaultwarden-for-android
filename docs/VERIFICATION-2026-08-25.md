@@ -497,8 +497,9 @@ switched off deliberately rather than left to time out, device left lying still.
 18:05:52  lock()
 ```
 
-**`setTimeout` was not lost.** The worst case — the timer gone and the vault
-sitting unlocked in a pocket — does not happen. The lock did occur.
+**`setTimeout` was not lost — over fifteen minutes.** The lock did occur. The
+generalisation drawn from it here, that the worst case does not happen, did not
+survive a longer run and is corrected below.
 
 **It was not on time either.** Roughly one minute late on a fifteen-minute
 timeout, and it landed the moment the device woke. The process therefore ran for
@@ -508,13 +509,74 @@ not one.
 
 **What this does not answer.** Fifteen minutes is short for Android's power
 management: Doze only deepens after longer stillness. A phone left overnight is
-untested, and the lateness there could be far larger than a minute.
-`browser.alarms` is the mechanism actually designed to survive this, and remains
-the honest fix if a longer idle behaves worse. Recorded in `docs/BACKLOG.md`.
+untested, and the lateness there could be far larger than a minute. That run has
+since happened, and the answer is worse than the question expected — see the
+next section.
 
 The trail also shows no message beacon before the `FIRED`, which confirms the
 popup was not opened first — opening it would have called `list`, touched the
 session and moved the deadline, and the run would have measured nothing.
+
+**H2 over a night, measured 2026-08-27/28. `setTimeout` does not fire at all.**
+
+The fifteen-minute run above could not reach the state it was trying to describe.
+Doze deepens with stillness, and fifteen minutes never gets there; the deadline
+falls while the device is still shallowly idle, which is why that run looked like
+mild throttling. So it was repeated over a night, with the timeout stretched to
+210 minutes so that the deadline would land in deep Doze — three and a half hours
+after the phone was put down and four and a half hours before it was picked up.
+Far enough from both ends that a fire at the deadline and a fire on waking could
+not be mistaken for each other.
+
+Conditions: armed 22:05:06 on battery at 86%, cable pulled, screen switched off
+deliberately rather than left to time out, device left lying still and untouched
+until 06:03. Battery saver was switched off first and confirmed unable to turn
+itself back on (`mSettingAutomaticBatterySaver=0`, trigger threshold 0), so the
+run could not silently become a measurement of power-saving mode partway through.
+No adb overnight, and that was the point: the tunnel keeps the device awake and
+works against the very Doze being measured, so `storage.local` was made the
+record and the loopback beacon merely its reader.
+
+```
+22:05:06  arm delayMs=12600000
+   ...    eight hours, not one event
+06:03:46  touch state=unlocked pendingTimer=true sinceArmedMs=28720049
+06:03:46  arm delayMs=12600000
+```
+
+Between those two lines there is nothing. No `FIRED`, no `lock()`, no `boot`.
+
+**The lock never ran.** `lock()` sets `state` to `"locked"` and `lockTimer` to
+`null` (`session.ts:218`), and the first interaction of the morning found
+`state=unlocked` with `pendingTimer=true`. The two halves say the same thing from
+opposite directions: the timer was still sitting there unfired, and the keys were
+still in memory.
+
+**It was four and a half hours overdue.** `sinceArmedMs=28720049` is seven hours
+fifty-eight minutes against a 210-minute deadline, so the lock was 4 h 28 m past
+due and still had not happened when the popup interrupted it.
+
+Firefox held PID 27581 across the whole night, so no restart took the timer with
+it — `Session.init` would have locked on the next start and the vault would never
+have been at risk. The background page lived, the handle lived, and `setTimeout`
+did not run.
+
+**This supersedes the reading of 2026-08-26.** "The worst case — the timer gone
+and the vault sitting unlocked in a pocket — does not happen" was an artefact of
+a fifteen-minute window. Over a night it is precisely what happens, and the
+add-on's one defence against a lost phone was absent for eight hours.
+
+One limit on the claim, stated so it is not read as more than it is: whether the
+timer would have fired shortly after waking cannot be known from this run,
+because the popup's own `touch` cleared and re-armed it some fifty milliseconds
+into the process being awake. It does not change the decision. A lock that waits
+for the user to come back is not an idle lock.
+
+**`browser.alarms` is therefore no longer conditional on a measurement.** It is
+the fix, it needs the `alarms` permission, and it is the first item of
+`docs/BACKLOG.md`. The rig that produced this is on branch `debug/f4-idle-lock`;
+the run's parameters and the reading procedure are in
+`~/f4-night-2026-08-27/RUNSHEET.md`, outside the repository.
 
 ### F-5 — An open popup goes on showing the vault after the vault has locked
 
@@ -635,11 +697,10 @@ What remains is not verification work:
 1. **F-3 is decided** (2026-08-27): the required grant stays, the dead per-host
    machinery is gone, and `docs/AMO-SUBMISSION.md` no longer contradicts itself.
    A1 and A2 are retired rather than unblocked. See the end of § F-3.
-2. **H2 is measured for fifteen minutes and no longer.** Screen off and on
-   battery, the idle lock fired 59 seconds late — throttled, not lost. A phone
-   left overnight has not been measured, and `browser.alarms` is the fix if a
-   long idle behaves worse. The beacon rig on `debug/f4-idle-lock` is what that
-   experiment needs.
+2. **H2 is measured over a night** (2026-08-27/28) and the answer is not a
+   degree of lateness: over eight hours `setTimeout` never fired, and the vault
+   stayed unlocked 4 h 28 m past its deadline. `browser.alarms` is no longer a
+   contingency — it is the fix, and it heads `docs/BACKLOG.md`. See § F-4.
 3. **The rest of `docs/BACKLOG.md`**, in its own order.
 
 ### Blocked on preparation
