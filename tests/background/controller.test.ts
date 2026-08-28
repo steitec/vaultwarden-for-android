@@ -911,6 +911,26 @@ describe("Controller", () => {
         vi.useRealTimers();
       }
     }, 20000);
+
+    // syncAttempt reads session.state directly, same shape as the
+    // matchesFor bug: without its own settle, an expired session mints a
+    // fresh refresh token and reaches the network instead of refusing.
+    it("syncNow refuses after the deadline and never reaches the network", async () => {
+      vi.useFakeTimers();
+      try {
+        const fetchStub = vi.fn();
+        vi.stubGlobal("fetch", fetchStub);
+        const { controller } = await makeController();
+        await controller.unlock(PIN);
+
+        vi.setSystemTime(Date.now() + 16 * 60 * 1000);
+
+        await expect(controller.syncNow()).rejects.toThrow(LockedError);
+        expect(fetchStub).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    }, 20000);
   });
 
   describe("a lock that lands in the middle of a load", () => {
