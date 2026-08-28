@@ -147,6 +147,10 @@ export class Controller {
   }
 
   status(): Status {
+    // First, before anything reads the session. A panel that opens onto an
+    // unlocked-looking vault whose every action then fails is F-5 wearing
+    // different clothes.
+    this.session.lockIfExpired();
     // Read `settings` once: it returns a fresh defensive clone on every
     // access, so two reads are two allocations and are not identical.
     const s = this.session.settings;
@@ -418,6 +422,11 @@ export class Controller {
    * rather than inferring it means a new caller has to state which it is.
    */
   private require(intent: "user" | "page"): VaultItem[] {
+    // Settle expiry BEFORE the state test, so an expired session is
+    // indistinguishable from a locked one to every caller. The idle lock is a
+    // deadline rather than a timer precisely because nothing can be relied on
+    // to fire on a sleeping device; this is where the deadline is read.
+    this.session.lockIfExpired();
     if (this.session.state !== "unlocked") throw new LockedError();
     if (intent === "user") this.session.touch();
     return this.items;
