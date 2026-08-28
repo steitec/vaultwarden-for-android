@@ -22,10 +22,13 @@ is no longer frozen and anything here may be picked up. The run itself is in
 The overnight run of 2026-08-27/28 showed `setTimeout` never fires on a sleeping
 device. The fix is not `browser.alarms`, which Gecko implements with its own
 in-process timers and which a frozen process freezes just the same. The idle
-lock is now a **deadline**, settled at three call sites — `Controller.require()`,
-`status()` and `matchesFor()` — which cannot fail to fire because nothing has to
-fire. The third was found in review rather than in design; § 5.3 of the design
-says why a method that returns a state rather than items needs its own call.
+lock is now a **deadline**, settled at four call sites — `Controller.require()`,
+`status()`, `matchesFor()` and `syncAttempt()` — which cannot fail to fire
+because nothing has to fire. The last two were each found in review rather than
+in design, on the same defect twice; § 5.3 and § 7 of the design say why a
+method that reads session state directly, instead of going through
+`require()`, needs its own call, and why that convention was still missed a
+second time after the first fix.
 
 Both questions this entry left open are answered: no persistence is needed,
 because `init()` already locks a session that outlived its background page; and

@@ -586,18 +586,21 @@ too, and adopting it on the strength of the specification's stated intent would
 have repeated the mistake this very run exposed.
 
 The lock is now a deadline. `Session` records the wall-clock time at which it
-expires, and three call sites settle it. `Controller.require()` — which the
+expires, and four call sites settle it. `Controller.require()` — which the
 code already calls the unlocked-vault guard, and through which every path that
 hands out vault items passes — settles it before it tests the state. `status()`
 does the same, so a panel never opens onto an unlocked-looking vault whose
-actions then fail. And `matchesFor()` needs its own, because it reads the state
-directly and returns on two of its three paths before the guard is reached; that
-third site was found in review rather than in design, and without it the first
-badge query after a device woke past its deadline would have thrown instead of
-answering "locked", leaving the page with no badge at all in precisely the case
-this work exists for. A timer has to run in order to protect anything; a
-deadline only has to be read, and it is read at the moment the process thaws
-because somebody is using the phone.
+actions then fail. `matchesFor()` needs its own, because it reads the state
+directly and returns on two of its three paths before the guard is reached;
+that third site was found in review rather than in design, and without it the
+first badge query after a device woke past its deadline would have thrown
+instead of answering "locked", leaving the page with no badge at all in
+precisely the case this work exists for. And `syncAttempt()` needs its own too,
+found by the whole-branch review after `matchesFor()` had already been fixed
+for the identical mistake — the same convention missed twice inside one
+branch. A timer has to run in order to protect anything; a deadline only has
+to be read, and it is read at the moment the process thaws because somebody is
+using the phone.
 
 `setTimeout` stays, demoted: it zeroes the keys promptly on a device that is
 awake, and is no longer what stands between a lost phone and the vault. No

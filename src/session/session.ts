@@ -15,7 +15,17 @@ export class PinAttemptsExhaustedError extends Error {
 }
 
 export class Session {
+  /**
+   * Stale past the idle deadline: this field is not updated on its own when
+   * time passes, only when something calls `lockIfExpired()`. Reading it
+   * anywhere else observes a session that may already be expired. The
+   * settling sites are `require()`, `status()`, `matchesFor()` and
+   * `syncAttempt()` in `src/background/controller.ts` — a new reading site
+   * needs its own call to `lockIfExpired()` first, the same way those four
+   * do.
+   */
   state: SessionState = "empty";
+  /** Same hazard as `state` above: settle with `lockIfExpired()` before reading. */
   userKey: SymKey | null = null;
   orgKeys: Map<string, SymKey> = new Map();
   accessToken: string | null = null;
