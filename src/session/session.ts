@@ -41,6 +41,23 @@ export class Session {
 
   private stored: StoredState | null = null;
   private lockTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * Wall-clock time at which this session expires, and the moment that
+   * deadline was set. `null` means there is no deadline at all: a locked
+   * session, or a `lockTimeoutMinutes` of 0, which means "never".
+   *
+   * This — not `lockTimer` — is what protects the vault. A timer has to run in
+   * order to fire, and on Android it does not: measured over a night on
+   * 2026-08-27/28, `setTimeout` never fired once while the device slept, and
+   * the vault was still unlocked four and a half hours past its deadline
+   * (docs/VERIFICATION-2026-08-25.md § F-4). A deadline only has to be read,
+   * and it is read at the guard every vault access already passes through.
+   *
+   * In memory on purpose. `init()` locks any session that outlived its
+   * background page, so a deadline can never need to survive one.
+   */
+  private lockDeadlineMs: number | null = null;
+  private armedAtMs: number | null = null;
   private pinBlockedThisRun = false;
 
   constructor(private store: StateStore) {}
@@ -204,15 +221,51 @@ export class Session {
     this.touch();
   }
 
-  /** Restarts the idle timer. Called on every user interaction. */
+  /**
+   * Restarts the idle deadline. Called on every user interaction.
+   *
+   * The `setTimeout` below is no longer the protection — see `lockDeadlineMs`.
+   * Its only remaining job is to zero the keys promptly on a device that is
+   * awake, so a phone lying on a desk does not keep plaintext in the heap. If
+   * Android suspends it, nothing is lost that the deadline does not cover.
+   */
   touch(): void {
     if (this.state !== "unlocked" || this.stored === null) return;
     if (this.lockTimer !== null) clearTimeout(this.lockTimer);
 
     const minutes = this.stored.lockTimeoutMinutes;
-    if (minutes <= 0) return; // 0 means never
+    if (minutes <= 0) {
+      // "Never" has to clear the deadline as well as skip the timer. Leaving a
+      // stale one behind would lock the vault at the first interaction after
+      // the user turned the timeout off.
+      this.lockDeadlineMs = null;
+      this.armedAtMs = null;
+      return;
+    }
 
-    this.lockTimer = setTimeout(() => this.lock(), minutes * 60 * 1000);
+    const delayMs = minutes * 60 * 1000;
+    this.armedAtMs = Date.now();
+    this.lockDeadlineMs = this.armedAtMs + delayMs;
+    this.lockTimer = setTimeout(() => this.lock(), delayMs);
+  }
+
+  /**
+   * Locks if the idle deadline has passed. Safe to call in any state, and
+   * cheap enough to call on every vault access — which is what
+   * `Controller.require()` does.
+   */
+  lockIfExpired(): void {
+    if (this.state !== "unlocked" || this.lockDeadlineMs === null) return;
+
+    const now = Date.now();
+    // `now < armedAtMs` means the wall clock moved backwards under us: an NTP
+    // correction, a timezone change, someone setting the clock. The deadline
+    // stops meaning anything, and locking is the reading that cannot be wrong.
+    // It costs the user one PIN entry.
+    const wentBackwards = this.armedAtMs !== null && now < this.armedAtMs;
+    if (now >= this.lockDeadlineMs || wentBackwards) {
+      this.lock();
+    }
   }
 
   lock(): void {
@@ -232,6 +285,8 @@ export class Session {
       clearTimeout(this.lockTimer);
       this.lockTimer = null;
     }
+    this.lockDeadlineMs = null;
+    this.armedAtMs = null;
     this.state = this.stored === null ? "empty" : "locked";
 
     // Last: the keys are already zeroed and the state is already consistent,
