@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { Controller } from "../../src/background/controller";
+import { Controller, LockedError } from "../../src/background/controller";
 import { wrapKeyWithPin } from "../../src/session/pin";
 import { Session, MAX_PIN_ATTEMPTS } from "../../src/session/session";
 import type { StoredState } from "../../src/session/store";
@@ -799,6 +799,146 @@ describe("Controller", () => {
         vi.useRealTimers();
       }
     }, 30000);
+  });
+
+  describe("an expired session, with no timer having fired", () => {
+    // The night of 2026-08-27 proved the timer does not fire on a sleeping
+    // device. Advancing the clock without advancing timers reproduces that in
+    // a test: the vault must refuse anyway.
+    it("refuses a list once the deadline has passed", async () => {
+      vi.useFakeTimers();
+      try {
+        const { controller, session } = await makeController();
+        await controller.unlock(PIN);
+        expect((await controller.list("")).map((i) => i.name)).toEqual(["GitHub"]);
+
+        vi.setSystemTime(Date.now() + 16 * 60 * 1000);
+
+        await expect(controller.list("")).rejects.toThrow(LockedError);
+        expect(session.state).toBe("locked");
+        expect(controller["items"]).toEqual([]);
+      } finally {
+        vi.useRealTimers();
+      }
+    }, 20000);
+
+    // Without this, the popup opens onto an unlocked-looking panel whose every
+    // action then fails — F-5 wearing different clothes.
+    it("reports itself locked from status()", async () => {
+      vi.useFakeTimers();
+      try {
+        const { controller } = await makeController();
+        await controller.unlock(PIN);
+        expect(controller.status().state).toBe("unlocked");
+
+        vi.setSystemTime(Date.now() + 16 * 60 * 1000);
+
+        expect(controller.status().state).toBe("locked");
+      } finally {
+        vi.useRealTimers();
+      }
+    }, 20000);
+
+    // F-4 must survive the new mechanism: a page that mutates on its own is
+    // not a person and must not push the deadline.
+    it("is not held open by a page asking for its matches", async () => {
+      vi.useFakeTimers();
+      try {
+        const { controller, session } = await makeController();
+        await controller.unlock(PIN);
+
+        vi.setSystemTime(Date.now() + 14 * 60 * 1000);
+        await matchedItems(controller, "https://github.com");
+
+        vi.setSystemTime(Date.now() + 2 * 60 * 1000);
+        controller.status();
+
+        expect(session.state).toBe("locked");
+      } finally {
+        vi.useRealTimers();
+      }
+    }, 20000);
+
+    // The guard against over-correcting the one above: the popup's own search
+    // is a person, and must still move the deadline.
+    it("is held open by the user searching from the popup", async () => {
+      vi.useFakeTimers();
+      try {
+        const { controller, session } = await makeController();
+        await controller.unlock(PIN);
+
+        vi.setSystemTime(Date.now() + 14 * 60 * 1000);
+        await controller.list("");
+
+        vi.setSystemTime(Date.now() + 2 * 60 * 1000);
+        controller.status();
+
+        expect(session.state).toBe("unlocked");
+      } finally {
+        vi.useRealTimers();
+      }
+    }, 20000);
+
+    // matchesFor reads session.state directly and returns on two paths before
+    // require() is reached, so the deadline must be settled here too. Without
+    // it, the content script gets no badge on the first call after expiry.
+    it("matchesFor resolves to locked rather than rejecting after the deadline", async () => {
+      vi.useFakeTimers();
+      try {
+        const { controller } = await makeController();
+        await controller.unlock(PIN);
+
+        vi.setSystemTime(Date.now() + 16 * 60 * 1000);
+
+        const answer = await controller.matchesFor("https://github.com");
+        expect(answer).toEqual({ state: "locked" });
+      } finally {
+        vi.useRealTimers();
+      }
+    }, 20000);
+
+    it("matchesFor with undefined url reports locked after the deadline", async () => {
+      vi.useFakeTimers();
+      try {
+        const { controller } = await makeController();
+        await controller.unlock(PIN);
+
+        vi.setSystemTime(Date.now() + 16 * 60 * 1000);
+
+        const answer = await controller.matchesFor(undefined);
+        expect(answer).toEqual({ state: "locked" });
+      } finally {
+        vi.useRealTimers();
+      }
+    }, 20000);
+
+    // syncAttempt reads session.state directly, same shape as the
+    // matchesFor bug: without its own settle, an expired session mints a
+    // fresh refresh token and reaches the network instead of refusing.
+    //
+    // The refresh token has to be configured for the network assertion to
+    // discriminate. With the fixture's default `wrappedRefreshToken: null`,
+    // syncAttempt throws "Sign in with your master password to sync." before
+    // it ever builds a request, so `fetch` would go untouched on the unfixed
+    // code as well and only the LockedError would be carrying the test.
+    it("syncNow refuses after the deadline and never reaches the network", async () => {
+      vi.useFakeTimers();
+      try {
+        const fetchStub = vi.fn();
+        vi.stubGlobal("fetch", fetchStub);
+        const { controller } = await makeController({
+          wrappedRefreshToken: await encryptToString(utf8("rt"), userKey),
+        });
+        await controller.unlock(PIN);
+
+        vi.setSystemTime(Date.now() + 16 * 60 * 1000);
+
+        await expect(controller.syncNow()).rejects.toThrow(LockedError);
+        expect(fetchStub).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    }, 20000);
   });
 
   describe("a lock that lands in the middle of a load", () => {

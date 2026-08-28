@@ -578,6 +578,39 @@ the fix, it needs the `alarms` permission, and it is the first item of
 the run's parameters and the reading procedure are in
 `~/f4-night-2026-08-27/RUNSHEET.md`, outside the repository.
 
+**Fixed, 2026-08-28 — by removing the dependency on a timer rather than by
+replacing it.** `browser.alarms` was the backlog's assumed fix, and it was
+dropped: Gecko implements alarms with its own timers inside the Firefox process
+rather than through Android's `AlarmManager`, so a frozen process freezes those
+too, and adopting it on the strength of the specification's stated intent would
+have repeated the mistake this very run exposed.
+
+The lock is now a deadline. `Session` records the wall-clock time at which it
+expires, and four call sites settle it. `Controller.require()` — which the
+code already calls the unlocked-vault guard, and through which every path that
+hands out vault items passes — settles it before it tests the state. `status()`
+does the same, so a panel never opens onto an unlocked-looking vault whose
+actions then fail. `matchesFor()` needs its own, because it reads the state
+directly and returns on two of its three paths before the guard is reached;
+that third site was found in review rather than in design, and without it the
+first badge query after a device woke past its deadline would have thrown
+instead of answering "locked", leaving the page with no badge at all in
+precisely the case this work exists for. And `syncAttempt()` needs its own too,
+found by the whole-branch review after `matchesFor()` had already been fixed
+for the identical mistake — the same convention missed twice inside one
+branch. A timer has to run in order to protect anything; a deadline only has
+to be read, and it is read at the moment the process thaws because somebody is
+using the phone.
+
+`setTimeout` stays, demoted: it zeroes the keys promptly on a device that is
+awake, and is no longer what stands between a lost phone and the vault. No
+permission was added, so `docs/AMO-SUBMISSION.md` is unaffected.
+
+The test that pins it advances the system clock without advancing timers — the
+frozen process exactly, and the reason none of the 626 tests standing on the
+night of this run had caught it. Design in
+`docs/superpowers/specs/2026-08-28-idle-lock-deadline-design.md`.
+
 ### F-5 — An open popup goes on showing the vault after the vault has locked
 
 Found 2026-08-26 while measuring H2, and only because the popup happened to be
