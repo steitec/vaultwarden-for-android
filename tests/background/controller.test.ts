@@ -915,12 +915,20 @@ describe("Controller", () => {
     // syncAttempt reads session.state directly, same shape as the
     // matchesFor bug: without its own settle, an expired session mints a
     // fresh refresh token and reaches the network instead of refusing.
+    //
+    // The refresh token has to be configured for the network assertion to
+    // discriminate. With the fixture's default `wrappedRefreshToken: null`,
+    // syncAttempt throws "Sign in with your master password to sync." before
+    // it ever builds a request, so `fetch` would go untouched on the unfixed
+    // code as well and only the LockedError would be carrying the test.
     it("syncNow refuses after the deadline and never reaches the network", async () => {
       vi.useFakeTimers();
       try {
         const fetchStub = vi.fn();
         vi.stubGlobal("fetch", fetchStub);
-        const { controller } = await makeController();
+        const { controller } = await makeController({
+          wrappedRefreshToken: await encryptToString(utf8("rt"), userKey),
+        });
         await controller.unlock(PIN);
 
         vi.setSystemTime(Date.now() + 16 * 60 * 1000);
