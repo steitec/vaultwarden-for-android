@@ -718,15 +718,39 @@ This one has no fix inside Manifest V2 — it is a limitation of match patterns,
 not an oversight. Recorded so nobody spends an afternoon on it. See the
 2026-08-25 design's §5.3.
 
-### The AMO reviewer note has never been through a review
+### The AMO reviewer note, reviewed 2026-08-29
 
 `docs/AMO-SUBMISSION.md` was rewritten when the badge landed, because its
 previous claims — no content script, exactly one host permission — became
 false. The new note makes specific, checkable claims about how the content
-script behaves.
+script behaves, and had never itself been checked. It has now been read
+against the source, claim by claim.
 
-Before submitting: re-read it against the code rather than trusting that it
-was accurate when written, and expect more scrutiny than the old `activeTab`
-posture would have drawn. All-sites host access is ordinary for a password
-manager, and both Bitwarden and 1Password match all URLs in their content
-scripts, but it is the kind of thing a reviewer asks about.
+The security-bearing claims all held. Four things did not, and are fixed:
+
+- **One was simply false.** The note said "a loopback address is refused as a
+  server". `setup()` checks `protocol !== "https:"` and nothing else
+  (`controller.ts`), so `https://localhost:8443` is accepted. The truth is the
+  mirror image of what was written, and the code already says so in
+  `InsecureServerUrlError`'s own comment: there is no loopback *exemption* for
+  the server, so http is refused there even for `localhost`, where the
+  page-filling rule does allow it. Someone read that comment and inverted it.
+- The package is about 90 KB, not 80; the source archive is roughly 110 files
+  and 430 KB zipped, not 90 files and 1 MB.
+- The `storage` paragraph named six of `StoredState`'s twelve fields while
+  reading as a complete list. The other six are not secret, but one of them is
+  a locally generated device id that goes to the server at login, which is
+  exactly what a privacy reviewer looks for. It is named now.
+- "Do not commit `source.zip`" was an instruction with nothing behind it.
+  `source.zip` is in `.gitignore` now, so the instruction is enforced rather
+  than remembered.
+
+One thing was left as-is: the build instructions ask for Node 22.12.0, and so
+does "Prerequisites" above, but no `engines` field or `.nvmrc` enforces it. Two
+prose copies of a version number, nothing a tool would catch drifting.
+
+Expect more scrutiny than the old `activeTab` posture would have drawn.
+All-sites host access is ordinary for a password manager, and both Bitwarden
+and 1Password match all URLs in their content scripts, but it is the kind of
+thing a reviewer asks about. **The note's own rule stands: re-read it against
+the code before each submission.** It was accurate when written too.
