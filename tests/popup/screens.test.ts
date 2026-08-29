@@ -204,6 +204,7 @@ describe("renderSetup", () => {
       mode: "reauthenticate",
       serverUrl: "https://vault.example.net",
       email: "a@b.com",
+      unlockMode: "pin",
     });
 
     expect(input(root, "#setup-server").value).toBe("https://vault.example.net");
@@ -212,6 +213,53 @@ describe("renderSetup", () => {
     // Still editable: the server may have moved.
     expect(input(root, "#setup-server").readOnly).toBe(false);
     expect(input(root, "#setup-email").readOnly).toBe(false);
+  });
+
+  // An account that unlocks per session comes back through this form after
+  // every Firefox restart. Asking for a PIN there would be asking the user to
+  // undo the setting they chose, once a day, without saying so.
+  it("asks for no PIN when a session-mode account re-authenticates", () => {
+    renderSetup(root, async () => {}, {
+      mode: "reauthenticate",
+      serverUrl: "https://vault.example.net",
+      email: "a@b.com",
+      unlockMode: "session",
+    });
+
+    expect(root.querySelector("#setup-pin")).toBeNull();
+    expect(root.textContent).not.toMatch(/PIN/i);
+  });
+
+  it("signs a session-mode account in without one", async () => {
+    const onSubmit = vi.fn(async () => {});
+    renderSetup(root, onSubmit, {
+      mode: "reauthenticate",
+      serverUrl: "https://vault.example.net",
+      email: "a@b.com",
+      unlockMode: "session",
+    });
+
+    input(root, "#setup-password").value = "correct-horse";
+    submit(root);
+    await Promise.resolve();
+
+    expect(onSubmit).toHaveBeenCalledWith({
+      serverUrl: "https://vault.example.net",
+      email: "a@b.com",
+      password: "correct-horse",
+      pin: "",
+    });
+  });
+
+  it("still asks for a PIN when a pin-mode account re-authenticates", () => {
+    renderSetup(root, async () => {}, {
+      mode: "reauthenticate",
+      serverUrl: "https://vault.example.net",
+      email: "a@b.com",
+      unlockMode: "pin",
+    });
+
+    expect(root.querySelector("#setup-pin")).not.toBeNull();
   });
 
   it("replaces whatever the container held instead of appending to it", () => {
@@ -353,11 +401,12 @@ describe("renderSettings", () => {
       onSync: vi.fn().mockResolvedValue(undefined),
       onLock: vi.fn().mockResolvedValue(undefined),
       onSignOut: vi.fn().mockResolvedValue(undefined),
+      onSetUnlockMode: vi.fn().mockResolvedValue(undefined),
     };
   }
 
   it("offers sync, lock, and sign out", () => {
-    renderSettings(root, handlers());
+    renderSettings(root, "pin", handlers());
     expect(root.querySelector("#settings-sync")).not.toBeNull();
     expect(root.querySelector("#settings-lock")).not.toBeNull();
     expect(root.querySelector("#settings-signout")).not.toBeNull();
@@ -365,14 +414,14 @@ describe("renderSettings", () => {
 
   it("syncs on tap", async () => {
     const h = handlers();
-    renderSettings(root, h);
+    renderSettings(root, "pin", h);
     el(root, "#settings-sync").dispatchEvent(new Event("click", { bubbles: true }));
     await vi.waitFor(() => expect(h.onSync).toHaveBeenCalled());
   });
 
   it("locks on tap", async () => {
     const h = handlers();
-    renderSettings(root, h);
+    renderSettings(root, "pin", h);
     el(root, "#settings-lock").dispatchEvent(new Event("click", { bubbles: true }));
     await vi.waitFor(() => expect(h.onLock).toHaveBeenCalled());
   });
@@ -380,7 +429,7 @@ describe("renderSettings", () => {
   it("does NOT sign out on the first tap", async () => {
     // One mistap on a phone must not wipe the device copy of the vault.
     const h = handlers();
-    renderSettings(root, h);
+    renderSettings(root, "pin", h);
     el(root, "#settings-signout").dispatchEvent(new Event("click", { bubbles: true }));
     await Promise.resolve();
 
@@ -391,7 +440,7 @@ describe("renderSettings", () => {
 
   it("signs out only after the confirmation is tapped", async () => {
     const h = handlers();
-    renderSettings(root, h);
+    renderSettings(root, "pin", h);
     el(root, "#settings-signout").dispatchEvent(new Event("click", { bubbles: true }));
     el(root, "#settings-signout-confirm").dispatchEvent(new Event("click", { bubbles: true }));
     await vi.waitFor(() => expect(h.onSignOut).toHaveBeenCalledTimes(1));
@@ -399,7 +448,7 @@ describe("renderSettings", () => {
 
   it("backs out of the confirmation without signing out", async () => {
     const h = handlers();
-    renderSettings(root, h);
+    renderSettings(root, "pin", h);
     el(root, "#settings-signout").dispatchEvent(new Event("click", { bubbles: true }));
     el(root, "#settings-signout-cancel").dispatchEvent(new Event("click", { bubbles: true }));
     await Promise.resolve();
@@ -411,8 +460,107 @@ describe("renderSettings", () => {
   it("reports a failed action instead of dropping it silently", async () => {
     const h = handlers();
     h.onLock.mockRejectedValue(new Error("The add-on is not responding."));
-    renderSettings(root, h);
+    renderSettings(root, "pin", h);
     el(root, "#settings-lock").dispatchEvent(new Event("click", { bubbles: true }));
     await vi.waitFor(() => expect(el(root, ".error").textContent).toMatch(/not responding/i));
+  });
+});
+
+describe("the unlock-mode switch", () => {
+  function handlers() {
+    return {
+      onSync: vi.fn().mockResolvedValue(undefined),
+      onLock: vi.fn().mockResolvedValue(undefined),
+      onSignOut: vi.fn().mockResolvedValue(undefined),
+      onSetUnlockMode: vi.fn().mockResolvedValue(undefined),
+    };
+  }
+
+  function tap(selector: string): void {
+    el(root, selector).dispatchEvent(new Event("click", { bubbles: true }));
+  }
+
+  // Turning the PIN off lowers what protects the account. On a phone these
+  // controls sit under a thumb, which is the same argument the sign-out
+  // confirmation is built on.
+  it("does not turn the PIN off on the first tap", async () => {
+    const h = handlers();
+    renderSettings(root, "pin", h);
+
+    tap("#settings-pinless");
+    await Promise.resolve();
+
+    expect(h.onSetUnlockMode).not.toHaveBeenCalled();
+    expect(root.textContent).toMatch(/only your master password/i);
+    expect(root.textContent).toMatch(/stays open until you tap Lock/i);
+    expect(root.textContent).toMatch(/stays in memory only/i);
+    expect(root.textContent).toMatch(/PIN is discarded/i);
+  });
+
+  it("turns the PIN off on the second tap", async () => {
+    const h = handlers();
+    renderSettings(root, "pin", h);
+
+    tap("#settings-pinless");
+    tap("#settings-pinless-confirm");
+
+    await vi.waitFor(() => expect(h.onSetUnlockMode).toHaveBeenCalledWith("session"));
+  });
+
+  it("backs out of the warning without changing anything", async () => {
+    const h = handlers();
+    renderSettings(root, "pin", h);
+
+    tap("#settings-pinless");
+    tap("#settings-pinless-cancel");
+    await Promise.resolve();
+
+    expect(h.onSetUnlockMode).not.toHaveBeenCalled();
+    expect(el(root, "#settings-pinless").hidden).toBe(false);
+  });
+
+  it("offers no pinless switch to an account that already unlocks per session", () => {
+    renderSettings(root, "session", handlers());
+    expect(root.querySelector("#settings-pinless")).toBeNull();
+    expect(root.querySelector("#settings-new-pin")).not.toBeNull();
+  });
+
+  // Checked here as well as in wrapKeyWithPin: reaching the KDF only to be
+  // refused would spend seconds saying what a length check says at once.
+  it("refuses a PIN under six characters without calling the handler", async () => {
+    const h = handlers();
+    renderSettings(root, "session", h);
+
+    input(root, "#settings-new-pin").value = "12345";
+    submit(root);
+    await Promise.resolve();
+
+    expect(h.onSetUnlockMode).not.toHaveBeenCalled();
+    expect(el(root, ".error").textContent).toMatch(/six/i);
+  });
+
+  it("turns the PIN back on and does not leave it in the field", async () => {
+    const h = handlers();
+    renderSettings(root, "session", h);
+    const pin = input(root, "#settings-new-pin");
+
+    pin.value = "246810";
+    submit(root);
+
+    await vi.waitFor(() => expect(h.onSetUnlockMode).toHaveBeenCalledWith("pin", "246810"));
+    await vi.waitFor(() => expect(pin.value).toBe(""));
+  });
+
+  it("clears the new PIN out of the DOM after a failed change too", async () => {
+    const h = handlers();
+    h.onSetUnlockMode.mockRejectedValue(new Error("The add-on is not responding."));
+    renderSettings(root, "session", h);
+    const pin = input(root, "#settings-new-pin");
+
+    pin.value = "246810";
+    submit(root);
+
+    await vi.waitFor(() => expect(el(root, ".error").textContent).toMatch(/not responding/i));
+    expect(pin.value).toBe("");
   });
 });

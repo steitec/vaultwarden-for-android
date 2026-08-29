@@ -33,6 +33,7 @@ async function baseState(): Promise<StoredState> {
     lastSyncMs: null,
     lockTimeoutMinutes: 15,
     requireMasterPasswordOnRestart: false,
+    unlockMode: "pin",
   };
 }
 
@@ -433,6 +434,140 @@ describe("Session", () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+
+    // The mode overrides the timeout; it does not overwrite it. A year of
+    // wall-clock time with nothing running is the frozen-process case from
+    // F-4, which in "pin" mode locks and here must not.
+    it("arms no deadline in session mode", async () => {
+      vi.useFakeTimers();
+      try {
+        const state: StoredState = {
+          ...(await baseState()),
+          unlockMode: "session",
+          pinWrapped: null,
+        };
+        await session.init();
+        await session.adoptLogin(state, {
+          userKey: {
+            encKey: new Uint8Array(32).fill(7),
+            macKey: new Uint8Array(32).fill(8),
+          },
+          orgKeys: new Map(),
+          accessToken: "token",
+        });
+        expect(session.state).toBe("unlocked");
+
+        vi.setSystemTime(Date.now() + 365 * 24 * 60 * 60 * 1000);
+        session.lockIfExpired();
+
+        expect(session.state).toBe("unlocked");
+        expect(session.userKey).not.toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("keeps the timeout setting while the mode overrides it", async () => {
+      const state: StoredState = {
+        ...(await baseState()),
+        unlockMode: "session",
+        pinWrapped: null,
+        lockTimeoutMinutes: 5,
+      };
+      await session.init();
+      await session.adoptLogin(state, {
+        userKey: {
+          encKey: new Uint8Array(32).fill(7),
+          macKey: new Uint8Array(32).fill(8),
+        },
+        orgKeys: new Map(),
+        accessToken: "token",
+      });
+
+      expect(session.settings?.lockTimeoutMinutes).toBe(5);
+      expect(session.unlockMode).toBe("session");
+    });
+  });
+
+  describe("switching the unlock mode", () => {
+    it("turning the PIN off clears the wrapped key and the deadline", async () => {
+      vi.useFakeTimers();
+      try {
+        await session.init();
+        await session.unlockWithPin("135790");
+
+        await session.useSessionUnlock();
+
+        expect(saved!.unlockMode).toBe("session");
+        expect(saved!.pinWrapped).toBeNull();
+        expect(saved!.failedPinAttempts).toBe(0);
+        expect(session.pinUnlockAvailable).toBe(false);
+
+        vi.setSystemTime(Date.now() + 24 * 60 * 60 * 1000);
+        session.lockIfExpired();
+        expect(session.state).toBe("unlocked");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("turning the PIN back on re-arms from the timeout that was kept", async () => {
+      vi.useFakeTimers();
+      try {
+        saved!.lockTimeoutMinutes = 5;
+        await session.init();
+        await session.unlockWithPin("135790");
+        await session.useSessionUnlock();
+
+        await session.usePinUnlock("246810");
+
+        expect(saved!.unlockMode).toBe("pin");
+        expect(saved!.pinWrapped).not.toBeNull();
+        expect(saved!.lockTimeoutMinutes).toBe(5);
+
+        vi.setSystemTime(Date.now() + 6 * 60 * 1000);
+        session.lockIfExpired();
+        expect(session.state).toBe("locked");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    // The point of the round trip: the key that comes back out is the key
+    // that went in, so the new PIN really opens the vault.
+    it("the re-wrapped key opens with the new PIN", async () => {
+      await session.init();
+      await session.unlockWithPin("135790");
+      await session.useSessionUnlock();
+      await session.usePinUnlock("246810");
+
+      session.lock();
+      await session.unlockWithPin("246810");
+
+      expect(session.state).toBe("unlocked");
+      expect(session.userKey?.encKey).toEqual(new Uint8Array(32).fill(4));
+      expect(session.userKey?.macKey).toEqual(new Uint8Array(32).fill(5));
+    });
+
+    it("refuses a PIN under six characters and changes nothing", async () => {
+      await session.init();
+      await session.unlockWithPin("135790");
+      await session.useSessionUnlock();
+
+      await expect(session.usePinUnlock("12345")).rejects.toThrow();
+
+      expect(saved!.unlockMode).toBe("session");
+      expect(saved!.pinWrapped).toBeNull();
+    });
+
+    it("refuses both switches on a locked vault", async () => {
+      await session.init();
+      expect(session.state).toBe("locked");
+
+      await expect(session.useSessionUnlock()).rejects.toThrow(/unlock/i);
+      await expect(session.usePinUnlock("246810")).rejects.toThrow(/unlock/i);
+      expect(saved!.unlockMode).toBe("pin");
     });
   });
 });

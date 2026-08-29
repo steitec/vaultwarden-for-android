@@ -1,7 +1,7 @@
 import type { SymKey } from "../crypto/encstring";
 import { zero } from "../crypto/bytes";
-import { unwrapKeyWithPin } from "./pin";
-import type { StateStore, StoredState } from "./store";
+import { unwrapKeyWithPin, wrapKeyWithPin } from "./pin";
+import { DEFAULT_UNLOCK_MODE, type StateStore, type StoredState, type UnlockMode } from "./store";
 
 export const MAX_PIN_ATTEMPTS = 5;
 
@@ -104,6 +104,14 @@ export class Session {
 
   get pinUnlockAvailable(): boolean {
     return !this.pinBlockedThisRun && (this.stored?.pinWrapped ?? null) !== null;
+  }
+
+  /**
+   * How this account unlocks. Defaults to "pin" when there is no account at
+   * all, so no caller has to special-case an empty session.
+   */
+  get unlockMode(): UnlockMode {
+    return this.stored?.unlockMode ?? DEFAULT_UNLOCK_MODE;
   }
 
   /**
@@ -232,6 +240,47 @@ export class Session {
   }
 
   /**
+   * Turns the PIN off: no wrapped key on disk, and no idle deadline.
+   *
+   * Only from an unlocked session. Both switches need the live user key —
+   * this one to be sure the caller is entitled to make the change at all,
+   * and `usePinUnlock` to have something to wrap.
+   *
+   * The wrapped key is DISCARDED rather than kept for later. Leaving it
+   * would keep the weakest thing on disk — six digits, roughly 20 bits,
+   * behind Argon2id — while the interface says there is no PIN.
+   * `failedPinAttempts` goes with it, so no stale counter survives to meet a
+   * future PIN.
+   *
+   * `touch()` afterwards is what clears a deadline that is already running.
+   */
+  async useSessionUnlock(): Promise<void> {
+    if (this.state !== "unlocked") throw new Error("Unlock the vault first");
+    await this.update({ unlockMode: "session", pinWrapped: null, failedPinAttempts: 0 });
+    this.touch();
+  }
+
+  /**
+   * Turns the PIN back on, wrapping the live user key under a new one.
+   *
+   * `wrapKeyWithPin` runs BEFORE anything is written, so a PIN that is too
+   * short leaves the account exactly as it was — the same ordering the setup
+   * screen already documents for its own PIN field.
+   *
+   * `touch()` afterwards re-arms the deadline from `lockTimeoutMinutes`,
+   * which was preserved across the excursion rather than zeroed, so the
+   * user's own timeout comes back without their having to set it again.
+   */
+  async usePinUnlock(pin: string): Promise<void> {
+    if (this.state !== "unlocked" || this.userKey === null) {
+      throw new Error("Unlock the vault first");
+    }
+    const pinWrapped = await wrapKeyWithPin(this.userKey, pin);
+    await this.update({ unlockMode: "pin", pinWrapped, failedPinAttempts: 0 });
+    this.touch();
+  }
+
+  /**
    * Restarts the idle deadline. Called on every user interaction.
    *
    * The `setTimeout` below is no longer the protection — see `lockDeadlineMs`.
@@ -244,10 +293,20 @@ export class Session {
     if (this.lockTimer !== null) clearTimeout(this.lockTimer);
 
     const minutes = this.stored.lockTimeoutMinutes;
-    if (minutes <= 0) {
-      // "Never" has to clear the deadline as well as skip the timer. Leaving a
+    if (this.stored.unlockMode === "session" || minutes <= 0) {
+      // Two ways to have no deadline: the user turned the timeout off, or the
+      // account unlocks per session and there is no automatic lock at all.
+      // Both have to CLEAR the deadline as well as skip the timer. Leaving a
       // stale one behind would lock the vault at the first interaction after
-      // the user turned the timeout off.
+      // the change.
+      //
+      // Expressing the mode HERE, where the deadline is armed, rather than at
+      // the places that read it, is deliberate. `Controller.require()`,
+      // `status()`, `matchesFor()` and `syncAttempt()` each settle the
+      // deadline before touching session state, and F-4 was found at those
+      // sites twice. A mode that gives them a fifth thing to remember is that
+      // defect's third chance; "the deadline is never armed" asks nothing of
+      // them at all.
       this.lockDeadlineMs = null;
       this.armedAtMs = null;
       return;

@@ -73,6 +73,7 @@ const BASE_STATE: StoredState = {
   lastSyncMs: 1000,
   lockTimeoutMinutes: 15,
   requireMasterPasswordOnRestart: false,
+  unlockMode: "pin",
 };
 
 /** Every controller method the dispatcher can reach, stubbed and observable. */
@@ -87,6 +88,7 @@ function makeSpies(c: Controller) {
         serverUrl: "https://v.example.net",
         pinUnlockAvailable: true,
         pinAttemptsRemaining: 5,
+        unlockMode: "pin",
       }),
     unlock: vi.spyOn(c, "unlock").mockResolvedValue(undefined),
     lock: vi.spyOn(c, "lock").mockReturnValue(undefined),
@@ -99,6 +101,7 @@ function makeSpies(c: Controller) {
     totpFor: vi.spyOn(c, "totpFor").mockResolvedValue({ code: "123456", secondsRemaining: 30 }),
     setup: vi.spyOn(c, "setup").mockResolvedValue({ ok: true }),
     syncNow: vi.spyOn(c, "syncNow").mockResolvedValue(undefined),
+    setUnlockMode: vi.spyOn(c, "setUnlockMode").mockResolvedValue(undefined),
   };
 }
 
@@ -141,6 +144,7 @@ const EVERY_KIND: unknown[] = [
   { kind: "totp", itemId: "c1" },
   { kind: "setup", serverUrl: "https://v.test", email: "a@b.com", password: "p", pin: "135790" },
   { kind: "sync" },
+  { kind: "setUnlockMode", mode: "session" },
 ];
 
 describe("handleMessage sender verification", () => {
@@ -170,6 +174,7 @@ describe("handleMessage sender verification", () => {
       serverUrl: "https://v.example.net",
       pinUnlockAvailable: true,
       pinAttemptsRemaining: 5,
+      unlockMode: "pin",
     });
     expect(spies.status).toHaveBeenCalled();
   });
@@ -271,6 +276,9 @@ describe("handleMessage request validation", () => {
         twoFactor: { token: "654321", provider: Number.NaN },
       },
     ],
+    ["setUnlockMode with no mode", { kind: "setUnlockMode" }],
+    ["setUnlockMode with an unknown mode", { kind: "setUnlockMode", mode: "none" }],
+    ["setUnlockMode with a non-string pin", { kind: "setUnlockMode", mode: "pin", pin: 123456 }],
   ];
 
   for (const [label, msg] of MALFORMED) {
@@ -288,6 +296,20 @@ describe("handleMessage request validation", () => {
 });
 
 describe("handleMessage routing", () => {
+  it("routes a mode change to the controller", async () => {
+    await expect(
+      handleMessage(controller, { kind: "setUnlockMode", mode: "session" }, SELF, READY),
+    ).resolves.toBeUndefined();
+    expect(spies.setUnlockMode).toHaveBeenCalledWith("session", undefined);
+  });
+
+  it("carries a new PIN through to the controller", async () => {
+    await expect(
+      handleMessage(controller, { kind: "setUnlockMode", mode: "pin", pin: "246810" }, SELF, READY),
+    ).resolves.toBeUndefined();
+    expect(spies.setUnlockMode).toHaveBeenCalledWith("pin", "246810");
+  });
+
   it("routes each request kind to the matching controller call", async () => {
     await handleMessage(controller, { kind: "status" }, SELF, READY);
     expect(spies.status).toHaveBeenCalledTimes(1);
@@ -567,6 +589,7 @@ describe("handOff", () => {
     serverUrl: "https://v.example.net",
     pinUnlockAvailable: true,
     pinAttemptsRemaining: 5,
+    unlockMode: "pin",
   } as const;
   const UNLOCKED_STATUS = { ...LOCKED_STATUS, state: "unlocked" } as const;
 
