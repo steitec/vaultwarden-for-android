@@ -432,6 +432,7 @@ export type SettingsHandlers = {
   onSync: () => Promise<void>;
   onLock: () => Promise<void>;
   onSignOut: () => Promise<void>;
+  onSetUnlockMode: (mode: UnlockMode, pin?: string) => Promise<void>;
 };
 
 /**
@@ -442,8 +443,16 @@ export type SettingsHandlers = {
  * uninstalling the add-on — and it is also the only irreversible thing in
  * this panel. Hence the second tap: on a phone these controls sit under a
  * thumb, and one mistap must not wipe the vault copy.
+ *
+ * Turning the PIN off gets the same second tap on the same argument: it is
+ * not irreversible, but it lowers what protects the account, and a mistap
+ * must not do that either.
  */
-export function renderSettings(container: HTMLElement, handlers: SettingsHandlers): void {
+export function renderSettings(
+  container: HTMLElement,
+  mode: UnlockMode,
+  handlers: SettingsHandlers,
+): void {
   container.replaceChildren();
 
   const err = errorSlot();
@@ -498,5 +507,101 @@ export function renderSettings(container: HTMLElement, handlers: SettingsHandler
     run(handlers.onSignOut);
   });
 
-  container.append(row, confirm, err);
+  const modeBlock = document.createElement("div");
+  modeBlock.className = "unlock-mode";
+
+  if (mode === "pin") {
+    const start = button("settings-pinless", "Unlock without a PIN", "button");
+
+    const warning = document.createElement("div");
+    warning.className = "settings-confirm";
+    warning.hidden = true;
+
+    const turnOff = button("settings-pinless-confirm", "Turn the PIN off", "button");
+    turnOff.classList.add("action-danger");
+    const keepPin = button("settings-pinless-cancel", "Cancel", "button");
+
+    warning.append(
+      paragraph(
+        "warn",
+        "No PIN. After Firefox restarts, only your master password opens this vault.",
+      ),
+      paragraph(
+        "warn",
+        "No idle lock. The vault stays open until you tap Lock or Firefox restarts. " +
+          "Anyone holding your unlocked phone can fill your logins into pages.",
+      ),
+      // The reassuring half, and it is not decoration: this is the whole
+      // difference from a password manager that keeps its key on disk, and
+      // without it the warning reads as heavier than the setting is.
+      paragraph(
+        "warn",
+        "Nothing extra is stored. The key stays in memory only, so a copy of this " +
+          "device's storage is protected by your master password exactly as it is today.",
+      ),
+      paragraph("warn", "Your current PIN is discarded."),
+      turnOff,
+      keepPin,
+    );
+
+    start.addEventListener("click", () => {
+      err.textContent = "";
+      start.hidden = true;
+      warning.hidden = false;
+    });
+    keepPin.addEventListener("click", () => {
+      warning.hidden = true;
+      start.hidden = false;
+    });
+    turnOff.addEventListener("click", () => {
+      run(() => handlers.onSetUnlockMode("session"));
+    });
+
+    modeBlock.append(start, warning);
+  } else {
+    const form = document.createElement("form");
+    form.className = "screen";
+    form.append(
+      paragraph(
+        "screen-hint",
+        "This vault unlocks without a PIN. Your master password is needed after every " +
+          "Firefox restart, and the vault does not lock itself while Firefox is running.",
+      ),
+    );
+
+    const newPin = field("settings-new-pin", {
+      label: "New PIN",
+      type: "password",
+      inputMode: "numeric",
+      autocomplete: "new-password",
+    });
+    form.append(newPin.row, button("settings-pin-submit", "Turn the PIN back on", "submit"));
+
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      err.textContent = "";
+
+      // Checked here as well as in wrapKeyWithPin: reaching the KDF only to
+      // be refused would spend seconds saying what a length check says now.
+      const value = newPin.input.value;
+      if (value.length < MIN_PIN_LENGTH) {
+        err.textContent = `Choose a PIN of at least ${MIN_PIN_LENGTH} (six) characters.`;
+        return;
+      }
+
+      run(async () => {
+        try {
+          await handlers.onSetUnlockMode("pin", value);
+        } finally {
+          // The field is the only place this PIN lingers once the handler has
+          // it. Cleared however that call settles, success or failure.
+          newPin.input.value = "";
+        }
+      });
+    });
+
+    modeBlock.append(form);
+  }
+
+  container.append(row, confirm, modeBlock, err);
 }
