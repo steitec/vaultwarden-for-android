@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { isStoredState } from "../../src/session/store";
+import { describe, it, expect, afterEach, vi } from "vitest";
+import { browserStore, isStoredState } from "../../src/session/store";
 import type { StoredState } from "../../src/session/store";
 
 const good: StoredState = {
@@ -16,6 +16,7 @@ const good: StoredState = {
   lastSyncMs: null,
   lockTimeoutMinutes: 15,
   requireMasterPasswordOnRestart: false,
+  unlockMode: "pin",
 };
 
 describe("isStoredState", () => {
@@ -96,5 +97,62 @@ describe("isStoredState", () => {
 
   it("rejects a non-boolean requireMasterPasswordOnRestart", () => {
     expect(isStoredState({ ...good, requireMasterPasswordOnRestart: "yes" })).toBe(false);
+  });
+});
+
+describe("isStoredState and the unlock mode", () => {
+  it("accepts a record in session mode", () => {
+    expect(isStoredState({ ...good, unlockMode: "session", pinWrapped: null })).toBe(true);
+  });
+
+  it("rejects an unlock mode it does not know", () => {
+    expect(isStoredState({ ...good, unlockMode: "none" })).toBe(false);
+    expect(isStoredState({ ...good, unlockMode: 1 })).toBe(false);
+  });
+
+  // The guard stays strict. What rescues an old record is the separate
+  // default applied before validation, not a hole in the guard itself.
+  it("rejects a record with no unlockMode at all", () => {
+    const missing: Record<string, unknown> = { ...good };
+    delete missing.unlockMode;
+    expect(isStoredState(missing)).toBe(false);
+  });
+});
+
+describe("browserStore.load", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function stubStorage(record: unknown): void {
+    vi.stubGlobal("browser", {
+      storage: { local: { get: async () => ({ state: record }) } },
+    });
+  }
+
+  // The record in daily use since 2026-08-29 has no unlockMode. Without the
+  // default applied ahead of the guard, load() returns null, the session
+  // reads "empty", and the add-on shows the setup screen: a silent sign-out
+  // that also drops the offline cache.
+  it("reads a record written before unlockMode existed as pin", async () => {
+    const legacy: Record<string, unknown> = { ...good };
+    delete legacy.unlockMode;
+    stubStorage(legacy);
+    const loaded = await browserStore.load();
+    expect(loaded?.unlockMode).toBe("pin");
+  });
+
+  it("leaves an explicit session mode alone", async () => {
+    stubStorage({ ...good, unlockMode: "session", pinWrapped: null });
+    const loaded = await browserStore.load();
+    expect(loaded?.unlockMode).toBe("session");
+  });
+
+  // The default fills one specific gap. It is not a repair shop.
+  it("does not rescue a record that is broken for another reason", async () => {
+    const broken: Record<string, unknown> = { ...good, kdf: null };
+    delete broken.unlockMode;
+    stubStorage(broken);
+    expect(await browserStore.load()).toBeNull();
   });
 });
