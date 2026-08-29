@@ -41,7 +41,8 @@ button goes away with it, so there is nothing left to install from.
 
 ## Before you start
 
-- An account on <https://addons.mozilla.org/> (a normal Firefox account works).
+- An account on <https://addons.mozilla.org/> (a normal Firefox account works),
+  **with two-factor authentication enabled** — see Step 1, it is enforced.
 - Node.js 22.12.0 and `npm ci` already run, per `docs/DEVELOPMENT.md`.
 - `adb` on the machine, if you want the tidy way to move the file to the phone.
 - Firefox for Android **122 or newer** on the phone. Any current release is fine.
@@ -51,22 +52,46 @@ button goes away with it, so there is nothing left to install from.
 
 ## Step 1 — Get AMO API credentials
 
+**Two-factor authentication is required, and it is the one thing that can stop
+you before you reach the key page.** Mozilla has enforced 2FA for extension
+developers logging in to AMO since 15 March 2021: without it you are redirected
+into your Firefox Account settings to turn it on before AMO will let you
+through. Download or print the recovery codes while you are there — losing the
+second factor with no codes locks you out of your own add-on.
+
+It is a one-time obstacle. Uploads through the API are exempt: once the keys
+exist, `npm run sign:unlisted` is never asked for a second factor.
+
 1. Sign in at <https://addons.mozilla.org/developers/>.
 2. Open **Manage API Keys** (under your account menu, or
    <https://addons.mozilla.org/developers/addon/api/key/>).
-3. Accept the developer agreement if you have not already.
+3. Accept the developer agreement if you have not already. Every submission is
+   subject to the *Firefox Add-on Distribution Agreement*, and the page will not
+   hand over credentials until it is accepted.
 4. Generate credentials. You get two values: a **JWT issuer** (looks like
-   `user:12345678:123`) and a **JWT secret** (a long hex string).
+   `user:12345:67`) and a **JWT secret** (64 hex characters, e.g.
+   `634f34bee43611d2f3c0fd8c06220ac780cff681a578092001183ab62c04e009`).
 
-The secret is shown **once**. Copy it now.
+The secret is shown **once**. Copy it now. If it is lost, generate a new pair on
+the same page; the old pair stops working.
+
+The 2FA rule and the exemption for API uploads are Mozilla's, announced at
+<https://blog.mozilla.org/addons/2021/03/11/two-factor-authentication-required-for-extension-developers/>.
+The key page URL and both value formats are from
+<https://extensionworkshop.com/documentation/develop/getting-started-with-web-ext/>.
 
 Put both in the environment rather than in a file in this repo — `web-ext` reads
 `WEB_EXT_*` variables for every option it has:
 
 ```bash
-export WEB_EXT_API_KEY='user:12345678:123'
-export WEB_EXT_API_SECRET='<the long hex secret>'
+export WEB_EXT_API_KEY='user:12345:67'
+export WEB_EXT_API_SECRET='<the 64-character hex secret>'
 ```
+
+Those live in that one shell only. For something more durable, keep them in a
+file **outside this repository** (`~/.amo-credentials`, say) and `source` it when
+you sign. Not `.bashrc`: that puts the pair into every shell on the machine,
+including any an agent or editor spawns.
 
 Never commit these. A leaked pair lets anyone publish under your add-on ID.
 
