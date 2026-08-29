@@ -611,6 +611,60 @@ frozen process exactly, and the reason none of the 626 tests standing on the
 night of this run had caught it. Design in
 `docs/superpowers/specs/2026-08-28-idle-lock-deadline-design.md`.
 
+#### Confirmed on the device, night of 2026-08-28/29
+
+The fix was armed on the phone overnight and **passed**. The two nights are the
+same experiment run against the two versions of the code, which is what makes
+the result worth more than a green suite:
+
+| | 2026-08-27, `setTimeout` | 2026-08-28, deadline |
+|---|---|---|
+| Armed | 22:05:06, `delayMs=12600000` | 22:07, 210 minutes |
+| Deadline | 01:35 | 01:37 |
+| Read | 06:03, ~8.0 h after arming | 07:00, ~8.9 h after arming |
+| Result | `state=unlocked`, `pendingTimer=true`, `sinceArmedMs=28720049` | **the popup showed the PIN pad** |
+
+The first row's last cell is what makes the second row mean something. Eight
+hours after arming and four and a half hours past its deadline, the old build's
+session still read `unlocked` with its timer still pending — no `FIRED` in
+`beacons.log`, not during the sleep and not on waking. On this device, with this
+delay, `setTimeout` demonstrably does not fire. The PIN pad seen on the second
+night therefore cannot be attributed to the timer; `lockIfExpired()` is the only
+thing that can have produced it, reached through `status()` when the popup asked.
+
+Two confounds were closed rather than argued away:
+
+- **A restarted Firefox would lock through `Session.init()`, not the deadline.**
+  The build was installed as a temporary add-on, which does not survive a Fenix
+  restart — so a popup appearing at all already proves the browser lived. Direct
+  evidence as well: Fenix held pid `28023` from arming through to the reading,
+  with `ps` reporting `ELAPSED 08:57:06`, and the device's own uptime showed five
+  days without a reboot.
+- **A restarted background page would lock the same way.** `manifest.json`
+  declares `"persistent": true`, an MV2 persistent background page rather than an
+  event page, so the `Session` that answered the popup is the object armed at
+  22:07.
+
+The idle timeout was overridden to 210 minutes in memory for the run, on the
+throwaway branch `debug/f4-confirm-deadline` (never merged, deleted afterwards).
+At the shipped fifteen minutes the deadline falls while the device is still
+awake, the `setTimeout` fires normally, and the run would have confirmed the
+timer — which was never in question. Pushed into deep Doze, nothing can fire and
+only the deadline is left. The override was held in memory deliberately: writing
+it to `StoredState.lockTimeoutMinutes` would have persisted a three-and-a-half
+hour idle lock onto the device, outliving the build that set it.
+
+Two things this run does **not** establish. The device's battery-saver state was
+not read — the dumpsys at arming caught only the battery level, and by the time
+that was noticed the cable was off, where re-attaching it would have charged the
+device and a charging device never enters Doze at all. It does not endanger the
+result: automatic battery saver triggers in the 5–15 % range against 85 % of
+charge, and a harder freeze would only strengthen the premise, with an
+over-aggressive Android killing Fenix and reading as inconclusive rather than as
+a pass. And the shipped fifteen-minute configuration was not itself run
+overnight; what was confirmed is the mechanism, on the same code path the
+shipped value uses.
+
 ### F-5 — An open popup goes on showing the vault after the vault has locked
 
 Found 2026-08-26 while measuring H2, and only because the popup happened to be
