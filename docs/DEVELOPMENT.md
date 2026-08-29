@@ -763,7 +763,7 @@ The security-bearing claims all held. Four things did not, and are fixed:
   page-filling rule does allow it. Someone read that comment and inverted it.
 - The package is about 90 KB, not 80; the source archive is roughly 110 files
   and 430 KB zipped, not 90 files and 1 MB.
-- The `storage` paragraph named six of `StoredState`'s twelve fields while
+- The `storage` paragraph named six of `StoredState`'s thirteen fields while
   reading as a complete list. The other six are not secret, but one of them is
   a locally generated device id that goes to the server at login, which is
   exactly what a privacy reviewer looks for. It is named now.
