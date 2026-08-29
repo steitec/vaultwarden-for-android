@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.12.0'
+          cache: npm
+
+      - run: npm ci
+
+      # Typecheck and unit suite. No network, no Docker.
+      - run: npm test
+
+      # dist/ is what web-ext lints and what a signed XPI is made from, so the
+      # build is worth its own step rather than being implied by the lint.
+      - run: npm run build
+
+      - run: npm run lint:ext
