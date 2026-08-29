@@ -123,6 +123,23 @@ eventually be somebody's bug report. Full write-ups in `docs/DEVELOPMENT.md` →
   Worth closing before a listed submission, when the release channel is what
   every reviewer and every user will be on.
   See `docs/PRIVATE-INSTALL.md` → "Walked for real, 2026-08-29".
+- **PIN-less unlock has never run on a phone.** Merged 2026-08-30 with the
+  unit suite green, and the suite cannot reach either half of what actually
+  matters here. Two checks, both on the device:
+
+  1. Turn the switch on, then restart Firefox. The master-password screen must
+     come up **without a PIN field**, and signing in must leave the account
+     still PIN-less. This is `setup()`'s preserve-the-mode path, and if it is
+     wrong the option turns itself off once a day — quietly, since the form
+     would simply ask for a PIN as it always did.
+  2. Leave the phone asleep well past fifteen minutes with the vault open. It
+     must still be open. The same rig as F-4, with the opposite expectation:
+     there, a frozen process had to wake up locked; here it must wake up
+     unlocked, because no deadline was ever armed.
+
+  Until both are done, the mode is tested only against jsdom and a fake
+  server, which is exactly the gap the overnight run of 2026-08-27/28 existed
+  to close for the idle lock.
 
 ---
 
