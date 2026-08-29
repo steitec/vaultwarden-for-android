@@ -33,6 +33,7 @@ async function baseState(): Promise<StoredState> {
     lastSyncMs: null,
     lockTimeoutMinutes: 15,
     requireMasterPasswordOnRestart: false,
+    unlockMode: "pin",
   };
 }
 

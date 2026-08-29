@@ -168,6 +168,7 @@ async function makeController(overrides: Partial<StoredState> = {}): Promise<Har
     lastSyncMs: 1000,
     lockTimeoutMinutes: 15,
     requireMasterPasswordOnRestart: false,
+    unlockMode: "pin",
     ...overrides,
   };
 

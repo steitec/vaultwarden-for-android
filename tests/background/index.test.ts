@@ -73,6 +73,7 @@ const BASE_STATE: StoredState = {
   lastSyncMs: 1000,
   lockTimeoutMinutes: 15,
   requireMasterPasswordOnRestart: false,
+  unlockMode: "pin",
 };
 
 /** Every controller method the dispatcher can reach, stubbed and observable. */
