@@ -153,13 +153,15 @@ Include this text:
 > `storage` holds the account record in `browser.storage.local`, and this is the
 > whole of it (`StoredState` in `src/session/store.ts`): the server URL and
 > email, the server's own encrypted user key and private key, the refresh token
-> encrypted under the user key, the PIN-wrapped user key, and the last sync
-> response cached as the server returned it — that is, still in the server's
-> ciphertext. Alongside those, six non-secret fields: a device id generated
+> encrypted under the user key, the PIN-wrapped user key — absent entirely for
+> an account the user has set to unlock without a PIN — and the last sync
+> response cached as the server returned it, that is, still in the server's
+> ciphertext. Alongside those, seven non-secret fields: a device id generated
 > locally with `crypto.randomUUID()` and sent to the user's own server at login
 > as Bitwarden's protocol requires, the server's own KDF parameters, the failed
-> PIN counter, the time of the last sync, and the two settings (idle timeout,
-> and whether a restart demands the master password). Nothing is stored in
+> PIN counter, the time of the last sync, and the three settings (idle timeout,
+> whether a restart demands the master password, and whether the account
+> unlocks with a PIN or once per browser session). Nothing is stored in
 > plaintext that the server did not already send in plaintext.
 >
 > **Page access.** The manifest requests `https://*/*`, `http://localhost/*`

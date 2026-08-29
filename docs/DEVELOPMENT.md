@@ -612,8 +612,9 @@ gesture.
       unlock screen.**
 
   Locking only zeroes the in-memory keys. Sign-out is the only thing that removes
-  `protectedUserKey`, `pinWrapped`, `wrappedRefreshToken` and the cipher cache
-  from `browser.storage.local`, which is what makes an offline attack on the
+  `protectedUserKey`, `pinWrapped` (which an account unlocking per session does
+  not have), `wrappedRefreshToken` and the cipher cache from
+  `browser.storage.local`, which is what makes an offline attack on the
   device possible. If the unlock screen comes back, the wipe did not happen and
   there is no way to get that material off the phone short of uninstalling.
 
