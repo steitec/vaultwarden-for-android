@@ -5,6 +5,7 @@ import type {
   SetupResult,
   Status,
 } from "../background/messages";
+import type { UnlockMode } from "../session/store";
 import { errorText, PinRejected } from "./errors";
 import {
   renderSettings,
@@ -563,7 +564,7 @@ export async function main(): Promise<void> {
     });
   }
 
-  async function showVault(): Promise<void> {
+  async function showVault(mode: UnlockMode): Promise<void> {
     // A list claim, not the route's: this is the initial list for a screen
     // that is already up, and it races the same way a keystroke's list does.
     // Taken before the first await, and it captures the route it belongs to,
@@ -576,7 +577,7 @@ export async function main(): Promise<void> {
     }
     if (settings !== null) {
       settings.hidden = false;
-      renderSettings(settings, {
+      renderSettings(settings, mode, {
         onSync: async () => {
           try {
             await request({ kind: "sync" });
@@ -594,6 +595,12 @@ export async function main(): Promise<void> {
         },
         onSignOut: async () => {
           await request({ kind: "signOut" });
+          await route();
+        },
+        // A full re-route rather than a local redraw: this moves the
+        // account's lock behaviour, and the header reports on it.
+        onSetUnlockMode: async (next, pin) => {
+          await request({ kind: "setUnlockMode", mode: next, pin });
           await route();
         },
       });
@@ -721,7 +728,7 @@ export async function main(): Promise<void> {
     renderStatus(status, statusEl);
 
     if (status.state === "unlocked") {
-      await showVault();
+      await showVault(status.unlockMode);
       return;
     }
 
