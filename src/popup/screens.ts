@@ -1,3 +1,4 @@
+import type { UnlockMode } from "../session/store";
 import { errorText, PinRejected } from "./errors";
 
 /**
@@ -102,9 +103,21 @@ export type SetupPrefill = {
   mode: "new" | "reauthenticate";
   serverUrl: string;
   email: string;
+  /**
+   * How the account on this device unlocks. Only `"session"` on a
+   * re-authentication changes anything: that account has no PIN by choice,
+   * and this form is the path it comes back through after every Firefox
+   * restart, so asking for one would undo the setting daily without saying so.
+   */
+  unlockMode: UnlockMode;
 };
 
-const NEW_PREFILL: SetupPrefill = { mode: "new", serverUrl: "", email: "" };
+const NEW_PREFILL: SetupPrefill = {
+  mode: "new",
+  serverUrl: "",
+  email: "",
+  unlockMode: "pin",
+};
 
 /**
  * The master-password sign-in form.
@@ -156,15 +169,25 @@ export function renderSetup(
     type: "password",
     autocomplete: "current-password",
   });
-  const pin = field("setup-pin", {
-    label: `PIN for unlocking on this device (${MIN_PIN_LENGTH}+ characters)`,
-    type: "password",
-    inputMode: "numeric",
-    autocomplete: "new-password",
-  });
+  // An account that unlocks per session has no PIN by choice, and this form
+  // is how it comes back after every Firefox restart. Rendering the field
+  // there would ask the user to undo their own setting, daily, without ever
+  // saying that is what it does. `setup()` refuses to consume a PIN on that
+  // path for the same reason.
+  const wantsPin = !(reauth && prefill.unlockMode === "session");
+  const pin = wantsPin
+    ? field("setup-pin", {
+        label: `PIN for unlocking on this device (${MIN_PIN_LENGTH}+ characters)`,
+        type: "password",
+        inputMode: "numeric",
+        autocomplete: "new-password",
+      })
+    : null;
 
   const err = errorSlot();
-  form.append(server.row, email.row, password.row, pin.row, err, button("setup-submit", "Sign in", "submit"));
+  form.append(server.row, email.row, password.row);
+  if (pin !== null) form.append(pin.row);
+  form.append(err, button("setup-submit", "Sign in", "submit"));
 
   form.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -176,7 +199,7 @@ export function renderSetup(
     // and the PIN is wrapped and unwrapped byte for byte — trimming one side
     // only would turn a correct PIN into "Incorrect PIN" forever.
     const masterPassword = password.input.value;
-    const chosenPin = pin.input.value;
+    const chosenPin = pin === null ? "" : pin.input.value;
 
     let parsed: URL | null = null;
     try {
@@ -192,7 +215,7 @@ export function renderSetup(
       return;
     }
 
-    if (chosenPin.length < MIN_PIN_LENGTH) {
+    if (pin !== null && chosenPin.length < MIN_PIN_LENGTH) {
       err.textContent = `Choose a PIN of at least ${MIN_PIN_LENGTH} (six) characters.`;
       return;
     }
@@ -211,7 +234,7 @@ export function renderSetup(
         // compromised popup process, but leaving a master password sitting
         // in a live DOM node for the lifetime of the panel is gratuitous.
         password.input.value = "";
-        pin.input.value = "";
+        if (pin !== null) pin.input.value = "";
       });
   });
 

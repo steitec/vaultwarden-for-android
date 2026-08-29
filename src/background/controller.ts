@@ -279,6 +279,22 @@ export class Controller {
     }
     if (parsed.protocol !== "https:") throw new InsecureServerUrlError();
 
+    // Read BEFORE the login, so the decision is made against the account that
+    // was on the device rather than against anything the server said.
+    //
+    // setup() is not only first-time setup: it is the master-password way
+    // back in, and for an account that unlocks per session that path runs
+    // after every Firefox restart. Rebuilding the record from defaults there
+    // would demand a new PIN and silently turn the option off again, daily.
+    //
+    // Scoped to the SAME account: a different server or a different address
+    // is a different vault, and it starts at the default like any other new
+    // one.
+    const previous = this.session.settings;
+    const sameAccount =
+      previous !== null && previous.serverUrl === serverUrl && previous.email === params.email;
+    const keepSessionMode = sameAccount && previous.unlockMode === "session";
+
     const deviceId = crypto.randomUUID();
     // InvalidCredentialsError and everything else propagate untouched from
     // here; see login.ts for why they may not be reshaped. Only the 2FA
@@ -309,7 +325,10 @@ export class Controller {
         kdf: r.kdf,
         protectedUserKey: r.tokens.Key,
         protectedPrivateKey: r.tokens.PrivateKey,
-        pinWrapped: await wrapKeyWithPin(r.userKey, params.pin),
+        // `params.pin` is ignored when the mode is kept: whoever got here
+        // proved the master password, which is strictly stronger than the
+        // PIN they are not being asked for.
+        pinWrapped: keepSessionMode ? null : await wrapKeyWithPin(r.userKey, params.pin),
         failedPinAttempts: 0,
         // Wrapped under the user key, so a locked vault cannot reach the
         // server on its own.
@@ -318,7 +337,7 @@ export class Controller {
         lastSyncMs: Date.now(),
         lockTimeoutMinutes: DEFAULT_LOCK_TIMEOUT_MINUTES,
         requireMasterPasswordOnRestart: DEFAULT_REQUIRE_MASTER_PASSWORD_ON_RESTART,
-        unlockMode: DEFAULT_UNLOCK_MODE,
+        unlockMode: keepSessionMode ? "session" : DEFAULT_UNLOCK_MODE,
       };
       await this.session.adoptLogin(state, {
         userKey: r.userKey,

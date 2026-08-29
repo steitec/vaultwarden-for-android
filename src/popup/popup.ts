@@ -748,6 +748,7 @@ export async function main(): Promise<void> {
       mode: status.state === "empty" ? "new" : "reauthenticate",
       serverUrl: status.serverUrl ?? "",
       email: status.email ?? "",
+      unlockMode: status.unlockMode,
     });
   }
 
