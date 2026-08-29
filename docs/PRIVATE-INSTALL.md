@@ -232,9 +232,16 @@ extensions in the recents view.
   Firefox rejects it at install time with a "corrupt" error. Reaching step 7 *is*
   the signature check.
 
-Then walk the manual checklist in `docs/DEVELOPMENT.md` — first-run setup, the
-host permission prompt, unlock, autofill. Those are the parts no test suite
-covers, and they run against your real server.
+Then walk the manual checklist in `docs/DEVELOPMENT.md` — first-run setup,
+unlock, autofill, and the host-permission item, which since the F-3 decision of
+2026-08-27 asserts the *absence* of a prompt during sign-in rather than its
+presence. Those are the parts no test suite covers, and they run against your
+real server.
+
+Its first item is half-answered by getting here: the install-time warning naming
+access to all https sites is Firefox's own, and it is the only permission prompt
+this add-on ever causes. A prompt appearing later, during sign-in, would mean the
+manifest had been narrowed without the popup being given a way to ask again.
 
 ---
 
