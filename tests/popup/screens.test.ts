@@ -204,6 +204,7 @@ describe("renderSetup", () => {
       mode: "reauthenticate",
       serverUrl: "https://vault.example.net",
       email: "a@b.com",
+      unlockMode: "pin",
     });
 
     expect(input(root, "#setup-server").value).toBe("https://vault.example.net");
@@ -212,6 +213,53 @@ describe("renderSetup", () => {
     // Still editable: the server may have moved.
     expect(input(root, "#setup-server").readOnly).toBe(false);
     expect(input(root, "#setup-email").readOnly).toBe(false);
+  });
+
+  // An account that unlocks per session comes back through this form after
+  // every Firefox restart. Asking for a PIN there would be asking the user to
+  // undo the setting they chose, once a day, without saying so.
+  it("asks for no PIN when a session-mode account re-authenticates", () => {
+    renderSetup(root, async () => {}, {
+      mode: "reauthenticate",
+      serverUrl: "https://vault.example.net",
+      email: "a@b.com",
+      unlockMode: "session",
+    });
+
+    expect(root.querySelector("#setup-pin")).toBeNull();
+    expect(root.textContent).not.toMatch(/PIN/i);
+  });
+
+  it("signs a session-mode account in without one", async () => {
+    const onSubmit = vi.fn(async () => {});
+    renderSetup(root, onSubmit, {
+      mode: "reauthenticate",
+      serverUrl: "https://vault.example.net",
+      email: "a@b.com",
+      unlockMode: "session",
+    });
+
+    input(root, "#setup-password").value = "correct-horse";
+    submit(root);
+    await Promise.resolve();
+
+    expect(onSubmit).toHaveBeenCalledWith({
+      serverUrl: "https://vault.example.net",
+      email: "a@b.com",
+      password: "correct-horse",
+      pin: "",
+    });
+  });
+
+  it("still asks for a PIN when a pin-mode account re-authenticates", () => {
+    renderSetup(root, async () => {}, {
+      mode: "reauthenticate",
+      serverUrl: "https://vault.example.net",
+      email: "a@b.com",
+      unlockMode: "pin",
+    });
+
+    expect(root.querySelector("#setup-pin")).not.toBeNull();
   });
 
   it("replaces whatever the container held instead of appending to it", () => {
