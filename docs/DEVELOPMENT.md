@@ -631,7 +631,11 @@ Recorded here so they are not silently lost:
 - passkeys
 - multiple accounts
 - WebSocket push sync via `/notifications`
-- a full public suffix list, if subdomain matching proves too coarse in practice
+- a refresh mechanism for the embedded public suffix list. The list itself is
+  complete — `src/vault/public-suffix-data.ts` carries the ICANN and PRIVATE
+  sections as retrieved 2026-08-07 — but it is a snapshot pinned at build time
+  and nothing updates it. A registry delegated after that date is not known to
+  the matcher.
 - a TOTP display in the popup (the background handler already exists)
 
 ### Signing and submission
