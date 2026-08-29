@@ -106,4 +106,18 @@ describe("manifest", () => {
     const httpPatterns = manifest.permissions.filter((p) => p.startsWith("http://"));
     expect(httpPatterns).toEqual(["http://localhost/*", "http://127.0.0.1/*"]);
   });
+
+  it("keeps the extension id exactly as signed", () => {
+    // Firefox treats a changed id as a different add-on: the signed build in
+    // daily use would become uninstallable-over, and setup, master password
+    // and PIN would all have to be entered again on the device.
+    //
+    // This is also the guard for the publication rewrite of 2026-08-29, which
+    // replaces two hostnames under this same domain across every commit. A
+    // replacement written against the bare domain instead of the two
+    // subdomains would rewrite this string as a side effect, and nothing else
+    // in the suite would notice.
+    const gecko = manifest.browser_specific_settings.gecko as { id?: string };
+    expect(gecko.id).toBe("vaultwarden-android@steitec.net");
+  });
 });
