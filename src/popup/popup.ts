@@ -87,6 +87,12 @@ const REQUEST_TIMEOUT_MS: Record<Request["kind"], number> = {
   // is the one operation where a false "not responding" leaves an account
   // that IS set up behind a screen that says it is not.
   setup: 45000,
+
+  // Turning the PIN ON runs Argon2id over the new PIN before anything is
+  // written — the same couple of seconds at the slow end that `unlock`
+  // budgets for. Turning it off is a single storage write, and shares this
+  // budget rather than earning a second entry.
+  setUnlockMode: 15000,
 };
 
 class BackgroundUnavailableError extends Error {

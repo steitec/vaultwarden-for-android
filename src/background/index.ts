@@ -177,6 +177,8 @@ async function dispatch(
       });
     case "sync":
       return controller.syncNow();
+    case "setUnlockMode":
+      return controller.setUnlockMode(msg.mode, msg.pin);
   }
 
   // Compile-time exhaustiveness check. A new Request kind added without a
