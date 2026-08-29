@@ -245,6 +245,42 @@ manifest had been narrowed without the popup being given a way to ask again.
 
 ---
 
+## Walked for real, 2026-08-29
+
+This route was followed end to end for the first time on that date, and the
+corrections it forced are already in the steps above: the 2FA prerequisite in
+Step 1, and the fact that AMO names the signed file itself, which had made the
+`adb push` in Step 5 and the file-picker instruction in Step 6 both wrong.
+
+What was confirmed on the device — SM-N981B, release Firefox **154.0**, package
+`org.mozilla.firefox`:
+
+- The signed XPI carries Mozilla's production signature. The chain reads
+  `CN=vaultwarden-android@steitec.net`, issued by
+  `CN=signingca1.addons.mozilla.org`, issued by `root-ca-production-amo`, and
+  the archive holds both signature forms (`mozilla.rsa`/`.sf`/`manifest.mf` and
+  `cose.sig`).
+- Install from file succeeded, so the signature is good — reaching that screen
+  *is* the check.
+- **Smoke test passed**: first-run setup against the real server completed with
+  no permission prompt during sign-in and the entry list appeared straight away;
+  Lock returned the PIN pad and the correct PIN restored the list; and on a real
+  login page the badge appeared **immediately** in the password field and filling
+  it populated both fields.
+
+The badge is the item this most needed to answer. It comes from a declared
+content script, and whether one registers under a *signed* install on the
+*release* channel is exactly what a Nightly run with a temporary add-on cannot
+tell you.
+
+**What this does not establish.** Only the smoke path was run. The full manual
+checklist in `docs/DEVELOPMENT.md` has never been walked on the release channel
+against a signed build — the complete run of 2026-08-26 recorded in
+`docs/VERIFICATION-2026-08-25.md` was on Nightly with a temporary add-on. In
+particular the fifteen-minute idle lock, the wrong-PIN counter, the React form,
+the off-screen decoy, the offline cache and sign-out are all carried by that
+earlier run. See `docs/BACKLOG.md` § 3.
+
 ## Updating later
 
 A self-distributed add-on does **not** update itself. Two options:

@@ -94,6 +94,16 @@ eventually be somebody's bug report. Full write-ups in `docs/DEVELOPMENT.md` →
   dropdown, which looks like partial success. jsdom covers it; no device needed.
 - **`http://[::1]` gets no badge.** No fix inside MV2 — a limitation of match
   patterns, recorded so nobody spends an afternoon on it.
+- **The full checklist has never run on the release channel.** The private
+  install was done on 2026-08-29 and smoke-tested there — setup, lock/unlock,
+  badge and fill, all passing on release Firefox 154.0 with the signed build.
+  Everything else is carried by the run of 2026-08-26, which was Nightly with a
+  temporary add-on: the fifteen-minute idle lock, the wrong-PIN counter, the
+  React form, the off-screen decoy, offline cache and sign-out. Nothing suggests
+  the channel changes any of them, which is why this is a gap and not a task.
+  Worth closing before a listed submission, when the release channel is what
+  every reviewer and every user will be on.
+  See `docs/PRIVATE-INSTALL.md` → "Walked for real, 2026-08-29".
 
 ---
 
