@@ -54,10 +54,16 @@ decision implied is done; § F-3 of `docs/VERIFICATION-2026-08-25.md` carries it
 including the one thing left for the listing itself: the reviewer will ask why
 every https site is needed, and the note now answers it.
 
-### 2.1 Re-read the reviewer note against the code
+### 2.1 ~~Re-read the reviewer note against the code~~ — done 2026-08-29
 
-It makes specific, checkable claims and has never been through a review. See
-`docs/DEVELOPMENT.md` → "The AMO reviewer note has never been through a review".
+Read claim by claim against the source. Everything security-bearing held; one
+claim was false (loopback as a server), two numbers had drifted, the storage
+list was incomplete, and `source.zip` is now gitignored rather than merely
+warned about. See `docs/DEVELOPMENT.md` → "The AMO reviewer note, reviewed
+2026-08-29".
+
+It is worth doing again before each submission rather than once: this pass
+found a sentence that was the mirror image of the code it described.
 
 ### 2.2 Build the `package` / `sign` scripts
 

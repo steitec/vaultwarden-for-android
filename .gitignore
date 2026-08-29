@@ -1,4 +1,6 @@
 node_modules/
 dist/
 web-ext-artifacts/
+# The AMO source archive, rebuilt per submission from the exact commit.
+source.zip
 *.log
