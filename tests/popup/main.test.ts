@@ -63,6 +63,7 @@ function status(over: Partial<Status> = {}): Status {
     serverUrl: "https://vault.example.net",
     pinUnlockAvailable: true,
     pinAttemptsRemaining: 5,
+    unlockMode: "pin",
     ...over,
   };
 }
@@ -742,6 +743,35 @@ describe("failure handling", () => {
     expect(requireEl("root").textContent).toContain("Listed");
   });
 
+  it("sends the mode change and re-reads the status afterwards", async () => {
+    const sent: unknown[] = [];
+    let mode: "pin" | "session" = "pin";
+    const base = defaultResponder({
+      status: () => status({ unlockMode: mode }),
+      setUnlockMode: () => {
+        mode = "session";
+        return undefined;
+      },
+    });
+    install((req: unknown) => {
+      sent.push(req);
+      return base(req);
+    }, []);
+    await main();
+
+    tap(requireEl("settings"), "#settings-pinless");
+    tap(requireEl("settings"), "#settings-pinless-confirm");
+
+    // The panel comes back showing the OTHER half of the switch, which is the
+    // observable proof that the handler re-routed on a fresh status rather
+    // than redrawing what it already had.
+    await vi.waitFor(() => {
+      expect(requireEl("settings").querySelector("#settings-new-pin")).not.toBeNull();
+    });
+
+    expect(sent).toContainEqual({ kind: "setUnlockMode", mode: "session", pin: undefined });
+  });
+
   it("reports a malformed answer instead of rendering a blank panel", async () => {
     install(defaultResponder({ status: () => ({ state: "bogus" }) }), []);
     await main();
@@ -777,6 +807,26 @@ describe("failure handling", () => {
         serverUrl: null,
         pinUnlockAvailable: true,
         pinAttemptsRemaining: Number.NaN,
+      },
+      // Complete but for the unlock mode. The settings panel draws a security
+      // switch from it, so a default invented here would show a position the
+      // background page never reported.
+      {
+        state: "locked",
+        lastSyncMs: null,
+        email: null,
+        serverUrl: null,
+        pinUnlockAvailable: true,
+        pinAttemptsRemaining: 5,
+      },
+      {
+        state: "locked",
+        lastSyncMs: null,
+        email: null,
+        serverUrl: null,
+        pinUnlockAvailable: true,
+        pinAttemptsRemaining: 5,
+        unlockMode: "none",
       },
     ]) {
       document.body.innerHTML = SKELETON;

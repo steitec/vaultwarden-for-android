@@ -36,7 +36,9 @@ could not close.
   frozen by Android for eight hours therefore wakes up locked: nothing has to
   fire, so nothing can fail to fire. This replaced a `setTimeout` that
   measurably never ran on a sleeping device — the measurement is in
-  `docs/VERIFICATION-2026-08-25.md` § F-4.
+  `docs/VERIFICATION-2026-08-25.md` § F-4. **An opt-in setting turns the
+  automatic lock off entirely** — see "Unlocking without a PIN" below. The
+  Lock button still works in that mode; only the automatic lock is gone.
 - **PIN guessing is bounded.** Five wrong PINs exhaust the PIN. The next attempt
   is refused rather than tried, the PIN-wrapped key is discarded, and the master
   password becomes the only way back in. The attempt is charged and persisted
@@ -60,12 +62,20 @@ could not close.
   counter defends against guessing on the device. It is a counter in storage,
   not a rate limit in hardware, and an attacker holding a copy of your storage
   is not subject to it. Your master password is what protects that copy.
+  **Unlocking without a PIN does not weaken this**, and that is the point of
+  how it is built: the user key itself is never written to disk in either mode
+  — only the server's own encrypted copy of it is — so an extracted image
+  faces your master password exactly as it does today. If anything it faces
+  slightly more, because that mode leaves no six-digit PIN wrapping in the
+  image to attack instead.
 - **A malicious or compromised Vaultwarden server.** The server cannot read your
   vault, but it chooses the KDF parameters, serves the encrypted keys, and can
   withhold or replay data. This add-on trusts the server you point it at to be
   yours.
 - **Someone holding your unlocked phone.** The idle lock and the PIN are the
-  limits of what is offered here.
+  limits of what is offered here. If you turn the PIN off, both limits go:
+  "unlocked" then lasts until you tap Lock or Firefox restarts, and anyone
+  holding the phone in that window can fill your logins into pages.
 - **Firefox itself, or another extension with host permissions.** Both sit above
   this add-on.
 - **Look-alike domains.** Entries are matched by registrable domain, computed
@@ -75,16 +85,39 @@ could not close.
   is a snapshot taken 2026-08-07 and nothing refreshes it; a registry delegated
   after that date is not known to the matcher.
 
+## Unlocking without a PIN
+
+Off by default. Turned on in the add-on's settings, behind a warning and a
+second tap, it changes two things and nothing else:
+
+- There is no PIN. The PIN-wrapped key is deleted from storage, and the
+  master password is the only way in — needed once per Firefox start.
+- There is no idle lock. The vault stays open until you tap Lock or Firefox
+  restarts.
+
+What it does **not** change is what is on disk. The user key lives in the
+background page's memory in both modes and is never written down, so the
+protection an extracted storage image faces is the same in both: your master
+password. This is the deliberate difference from a password manager that buys
+the same convenience by keeping its key beside the database — Firefox's own
+built-in one does that, and gates reading a password on the operating
+system's keyguard instead. A browser extension cannot invoke Android's
+keyguard, so that trade is not available here and was not made.
+
+The cost is real and it is the second point above: on a phone someone else
+picks up, "unlocked" lasts much longer than fifteen minutes.
+
 ## What is stored, and where
 
 `browser.storage.local` holds one record. In full: the server URL and email; the
 server's own encrypted user key and private key; the refresh token, wrapped
-under the user key; the PIN-wrapped user key; and the last sync response cached
-exactly as the server returned it, which is to say still in the server's
-ciphertext. Beside those, six fields that are not secret — a device id generated
-locally with `crypto.randomUUID()` and sent to your own server at login as the
-Bitwarden protocol requires, the server's KDF parameters, the failed-PIN
-counter, the time of the last sync, and two settings.
+under the user key; the PIN-wrapped user key — absent entirely for an account
+that unlocks without a PIN; and the last sync response cached exactly as the
+server returned it, which is to say still in the server's ciphertext. Beside
+those, seven fields that are not secret — a device id generated locally with
+`crypto.randomUUID()` and sent to your own server at login as the Bitwarden
+protocol requires, the server's KDF parameters, the failed-PIN counter, the
+time of the last sync, and three settings.
 
 Nothing is stored in plaintext that the server did not already send in
 plaintext. `src/session/store.ts` is the whole of it.

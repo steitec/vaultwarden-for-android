@@ -97,6 +97,22 @@ eventually be somebody's bug report. Full write-ups in `docs/DEVELOPMENT.md` →
   dropdown, which looks like partial success. jsdom covers it; no device needed.
 - **`http://[::1]` gets no badge.** No fix inside MV2 — a limitation of match
   patterns, recorded so nobody spends an afternoon on it.
+- **A badge tap against a locked vault is lost when the vault is opened with
+  the master password.** `redeemPending()` hangs off `unlock(pin)` alone
+  (`src/background/controller.ts`); `setup()` never calls it. Today that costs
+  a tap only after a PIN lockout. For an account that unlocks without a PIN it
+  costs one after every Firefox restart, which is that mode's ordinary way
+  back in. The fix is one call in `setup()`: `redeemPending` goes through
+  `fill()` unchanged, so the https check, the URL re-match against the tab and
+  the refusal for a passwordless entry all still apply. Found 2026-08-30 while
+  building the PIN-less option, and deliberately left out of that branch.
+- **A re-authentication resets the idle timeout and the restart policy.**
+  `setup()` rebuilds the record and writes `DEFAULT_LOCK_TIMEOUT_MINUTES` and
+  `DEFAULT_REQUIRE_MASTER_PASSWORD_ON_RESTART` over whatever was there. The
+  unlock mode is now preserved across that path, deliberately; these two are
+  not, and nothing tells the user. Invisible today because neither has a
+  control in the interface — which is also why fixing it belongs with building
+  those controls rather than before them.
 - **The full checklist has never run on the release channel.** The private
   install was done on 2026-08-29 and smoke-tested there — setup, lock/unlock,
   badge and fill, all passing on release Firefox 154.0 with the signed build.

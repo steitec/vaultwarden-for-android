@@ -5,6 +5,7 @@ import type {
   SetupResult,
   Status,
 } from "../background/messages";
+import type { UnlockMode } from "../session/store";
 import { errorText, PinRejected } from "./errors";
 import {
   renderSettings,
@@ -87,6 +88,12 @@ const REQUEST_TIMEOUT_MS: Record<Request["kind"], number> = {
   // is the one operation where a false "not responding" leaves an account
   // that IS set up behind a screen that says it is not.
   setup: 45000,
+
+  // Turning the PIN ON runs Argon2id over the new PIN before anything is
+  // written — the same couple of seconds at the slow end that `unlock`
+  // budgets for. Turning it off is a single storage write, and shares this
+  // budget rather than earning a second entry.
+  setUnlockMode: 15000,
 };
 
 class BackgroundUnavailableError extends Error {
@@ -150,6 +157,11 @@ function isStatus(v: unknown): v is Status {
   if (!("pinAttemptsRemaining" in v)) return false;
   if (typeof v.pinAttemptsRemaining !== "number" || !Number.isFinite(v.pinAttemptsRemaining))
     return false;
+  // Same reasoning as the two above: the settings panel draws a security
+  // switch from this, and a default invented here would draw it in a position
+  // the background page never reported.
+  if (!("unlockMode" in v)) return false;
+  if (v.unlockMode !== "pin" && v.unlockMode !== "session") return false;
   return true;
 }
 
@@ -552,7 +564,7 @@ export async function main(): Promise<void> {
     });
   }
 
-  async function showVault(): Promise<void> {
+  async function showVault(mode: UnlockMode): Promise<void> {
     // A list claim, not the route's: this is the initial list for a screen
     // that is already up, and it races the same way a keystroke's list does.
     // Taken before the first await, and it captures the route it belongs to,
@@ -565,7 +577,7 @@ export async function main(): Promise<void> {
     }
     if (settings !== null) {
       settings.hidden = false;
-      renderSettings(settings, {
+      renderSettings(settings, mode, {
         onSync: async () => {
           try {
             await request({ kind: "sync" });
@@ -583,6 +595,12 @@ export async function main(): Promise<void> {
         },
         onSignOut: async () => {
           await request({ kind: "signOut" });
+          await route();
+        },
+        // A full re-route rather than a local redraw: this moves the
+        // account's lock behaviour, and the header reports on it.
+        onSetUnlockMode: async (next, pin) => {
+          await request({ kind: "setUnlockMode", mode: next, pin });
           await route();
         },
       });
@@ -710,7 +728,7 @@ export async function main(): Promise<void> {
     renderStatus(status, statusEl);
 
     if (status.state === "unlocked") {
-      await showVault();
+      await showVault(status.unlockMode);
       return;
     }
 
@@ -737,6 +755,7 @@ export async function main(): Promise<void> {
       mode: status.state === "empty" ? "new" : "reauthenticate",
       serverUrl: status.serverUrl ?? "",
       email: status.email ?? "",
+      unlockMode: status.unlockMode,
     });
   }
 

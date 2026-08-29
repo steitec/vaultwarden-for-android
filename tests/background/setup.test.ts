@@ -209,6 +209,80 @@ function makeHarness(initial: StoredState | null = null): Harness {
 beforeEach(() => vi.unstubAllGlobals());
 afterEach(() => vi.unstubAllGlobals());
 
+/**
+ * An account already on the device that unlocks per session: no wrapped PIN,
+ * and `unlockMode: "session"`. The cryptographic fields are placeholders —
+ * setup() overwrites every one of them; what this fixture exists to carry is
+ * the identity (server and address) and the mode.
+ */
+function sessionModeAccount(over: Partial<StoredState> = {}): StoredState {
+  return {
+    serverUrl: SERVER,
+    email: "a@b.com",
+    deviceId: "dev",
+    kdf: { kdf: 0, iterations: 600000, memory: null, parallelism: null, salt: null },
+    protectedUserKey: "2.a|b|c",
+    protectedPrivateKey: "2.d|e|f",
+    pinWrapped: null,
+    failedPinAttempts: 0,
+    wrappedRefreshToken: null,
+    cipherCache: null,
+    lastSyncMs: 1000,
+    lockTimeoutMinutes: 15,
+    requireMasterPasswordOnRestart: false,
+    unlockMode: "session",
+    ...over,
+  };
+}
+
+describe("Controller.setup and the unlock mode", () => {
+  // setup() is not only first-time setup: it is the master-password way back
+  // in, which for an account that unlocks per session runs after EVERY
+  // Firefox restart. Rebuilding the record from defaults there would demand a
+  // new PIN and turn the option off again, daily.
+  it("keeps session mode when the same account signs in again", async () => {
+    await stubServer();
+    const h = makeHarness(sessionModeAccount());
+    await h.controller.init();
+    expect(h.controller.status().state).toBe("locked");
+
+    await h.controller.setup({ serverUrl: SERVER, email: "a@b.com", password: PASSWORD, pin: "" });
+
+    expect(h.controller.status().state).toBe("unlocked");
+    expect(h.stored()!.unlockMode).toBe("session");
+    expect(h.stored()!.pinWrapped).toBeNull();
+  }, 30000);
+
+  // A different address is a different vault. It starts at the default, and
+  // the PIN it was given is wrapped as usual.
+  //
+  // Written with the OTHER address on the stored record rather than on the
+  // sign-in: the fake server derives its keys from `a@b.com`, because the
+  // address is the KDF salt, so signing in as anyone else cannot unwrap the
+  // user key it hands back. The branch under test is the same either way.
+  it("starts a different account at the default, PIN and all", async () => {
+    await stubServer();
+    const h = makeHarness(sessionModeAccount({ email: "someone-else@b.com" }));
+    await h.controller.init();
+
+    await h.controller.setup({ serverUrl: SERVER, email: "a@b.com", password: PASSWORD, pin: PIN });
+
+    expect(h.stored()!.unlockMode).toBe("pin");
+    expect(h.stored()!.pinWrapped).not.toBeNull();
+  }, 30000);
+
+  it("starts the same address on a different server at the default too", async () => {
+    await stubServer();
+    const h = makeHarness(sessionModeAccount({ serverUrl: "https://other.example.net" }));
+    await h.controller.init();
+
+    await h.controller.setup({ serverUrl: SERVER, email: "a@b.com", password: PASSWORD, pin: PIN });
+
+    expect(h.stored()!.unlockMode).toBe("pin");
+    expect(h.stored()!.pinWrapped).not.toBeNull();
+  }, 30000);
+});
+
 describe("Controller.setup", () => {
   it("logs in, persists the account, and leaves the vault unlocked", async () => {
     const a = await account();
