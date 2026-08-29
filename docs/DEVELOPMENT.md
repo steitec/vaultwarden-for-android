@@ -634,46 +634,68 @@ Recorded here so they are not silently lost:
 - a full public suffix list, if subdomain matching proves too coarse in practice
 - a TOTP display in the popup (the background handler already exists)
 
-### Signing and submission: designed, not built
-
-There is no `sign` script yet. Building and submitting to AMO is still a manual
-walk through the dashboard. The shape below was agreed on 2026-08-25 and is
-recorded so it does not have to be re-argued:
+### Signing and submission
 
 ```json
-"package": "npm run build && npm run lint:ext && git archive --format=zip -o source.zip HEAD",
-"sign":    "npm test && npm run package && web-ext sign -s dist --channel=listed --upload-source-code=source.zip"
+"package":       "…clean-tree check… && npm run build && npm run lint:ext && git archive --format=zip -o source.zip HEAD",
+"sign:unlisted": "npm test && npm run package && web-ext sign -s dist --channel=unlisted --upload-source-code=source.zip"
 ```
 
-**Two scripts, not one, and that is the whole point.** `web-ext sign
---channel=listed` uploads the build and submits that version for review. It is
-outward-facing and cannot be taken back — a submitted version can later be
-disabled, but the version number is spent at AMO either way. A single command
-that does this as a side effect of "make me a build" is a trap. So `package` is
-the harmless half (builds, lints, writes `source.zip`, touches no network) and
-`sign` is the one command that actually sends something.
+Built 2026-08-29 against the shape agreed on 2026-08-25, with two departures
+from it, both recorded below. `tests/scripts.test.ts` pins the properties that
+make this safe, because none of them is visible in a diff that only shows a
+changed string in `package.json`.
 
-`--upload-source-code` means the source archive rides along with the
-submission instead of being uploaded separately in the dashboard, which is what
-the "Source code submission" section of `docs/AMO-SUBMISSION.md` currently
-describes doing by hand.
+**Two scripts, not one, and that is the whole point.** `web-ext sign` uploads
+the build to AMO, and a version number is spent there whether or not the result
+is ever installed — across *both* channels at once, so a number spent on a
+private unlisted build can never be reused for a public listed one. A single
+command that does this as a side effect of "make me a build" is a trap. So
+`package` is the harmless half (builds, lints, writes `source.zip`, touches no
+network) and `sign:unlisted` is the one command that actually sends something.
+
+`--upload-source-code` means the source archive rides along with the submission
+instead of being uploaded separately in the dashboard.
 
 Credentials come from the `WEB_EXT_API_KEY` and `WEB_EXT_API_SECRET`
 environment variables (AMO: *Tools → Manage API Keys*), never as `--api-key`
 flags in `package.json` — flags land in shell history and in the process list
-of every user on the machine. They belong nowhere in this repository.
+of every user on the machine. They belong nowhere in this repository, and a
+test asserts that they are nowhere in `package.json`.
 
-`npm test` runs first. Twenty-five seconds against a version that cannot be
-recalled is cheap insurance, not ceremony.
+`npm test` runs first. Thirty seconds against a version that cannot be recalled
+is cheap insurance, not ceremony.
 
-Two things to do when building it: add `source.zip` to `.gitignore`, where
-`docs/AMO-SUBMISSION.md` currently only warns against committing it in prose;
-and note that AMO rejects a version number it has already seen, so `version` in
-**both** `package.json` and `src/manifest.json` has to be raised before each
-submission.
+AMO rejects a version number it has already seen, so `version` in **both**
+`package.json` and `src/manifest.json` has to be raised before each submission.
+Nothing enforces that; `docs/PRIVATE-INSTALL.md` § Step 2 is where it is
+checked by hand.
 
-Only `package` is meaningfully testable — it is deterministic and offline.
-Testing `sign` against AMO would mean making a real submission.
+#### The two departures from the 2026-08-25 design
+
+**The channel is in the script name.** The design wrote a single `sign` with
+`--channel=listed`; what was wanted first was unlisted, for the private install.
+Rather than redefining `sign`, the channel is named: `sign:unlisted`. A bare
+`sign` would mean unlisted today and listed the day a public submission is
+wanted, and the muscle memory would not notice the difference — which is the
+same argument that produced the two-script split in the first place, one level
+up. There is no `sign:listed` script yet. Adding one is a deliberate act, which
+is the point.
+
+**`package` refuses a dirty working tree.** `source.zip` is written from `HEAD`
+while `dist/` is built from the working tree, so with uncommitted changes the
+two describe different code — and the archive is exactly what a reviewer reads
+to decide whether the bundled JavaScript is honest. `docs/AMO-SUBMISSION.md`
+already required "a clean checkout of the exact commit being submitted"; the
+check enforces it rather than trusting it to be remembered.
+
+`source.zip` is in `.gitignore` (added 2026-08-29 with the reviewer-note
+review), so the design's other build-time to-do is done.
+
+Only `package` is meaningfully testable end to end — it is deterministic and
+offline. Testing `sign:unlisted` against AMO would mean making a real
+submission, so what the suite pins is its shape: the channel, the order of the
+`&&` chain, the source archive, and the absence of credentials.
 
 ## Known gaps in what already ships
 
