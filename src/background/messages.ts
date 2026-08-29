@@ -1,3 +1,5 @@
+import type { UnlockMode } from "../session/store";
+
 /**
  * The popup/background message contract.
  *
@@ -29,6 +31,12 @@ export type Status = {
   pinUnlockAvailable: boolean;
   /** Tries left before the wrapped key is dropped. Never negative. */
   pinAttemptsRemaining: number;
+  /**
+   * How this account unlocks. The settings switch draws its position from
+   * this; nothing routes a SCREEN on it, because a locked "session" account
+   * is already covered by `pinUnlockAvailable` being false.
+   */
+  unlockMode: UnlockMode;
 };
 
 export type TotpCode = { code: string; secondsRemaining: number };

@@ -168,6 +168,7 @@ export class Controller {
       // costs an attempt, deliberately) must not render as a negative
       // countdown.
       pinAttemptsRemaining: Math.max(0, MAX_PIN_ATTEMPTS - (s?.failedPinAttempts ?? 0)),
+      unlockMode: this.session.unlockMode,
     };
   }
 
