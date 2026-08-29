@@ -1,7 +1,7 @@
 import type { SymKey } from "../crypto/encstring";
 import { zero } from "../crypto/bytes";
 import { unwrapKeyWithPin } from "./pin";
-import type { StateStore, StoredState } from "./store";
+import { DEFAULT_UNLOCK_MODE, type StateStore, type StoredState, type UnlockMode } from "./store";
 
 export const MAX_PIN_ATTEMPTS = 5;
 
@@ -104,6 +104,14 @@ export class Session {
 
   get pinUnlockAvailable(): boolean {
     return !this.pinBlockedThisRun && (this.stored?.pinWrapped ?? null) !== null;
+  }
+
+  /**
+   * How this account unlocks. Defaults to "pin" when there is no account at
+   * all, so no caller has to special-case an empty session.
+   */
+  get unlockMode(): UnlockMode {
+    return this.stored?.unlockMode ?? DEFAULT_UNLOCK_MODE;
   }
 
   /**
@@ -244,10 +252,20 @@ export class Session {
     if (this.lockTimer !== null) clearTimeout(this.lockTimer);
 
     const minutes = this.stored.lockTimeoutMinutes;
-    if (minutes <= 0) {
-      // "Never" has to clear the deadline as well as skip the timer. Leaving a
+    if (this.stored.unlockMode === "session" || minutes <= 0) {
+      // Two ways to have no deadline: the user turned the timeout off, or the
+      // account unlocks per session and there is no automatic lock at all.
+      // Both have to CLEAR the deadline as well as skip the timer. Leaving a
       // stale one behind would lock the vault at the first interaction after
-      // the user turned the timeout off.
+      // the change.
+      //
+      // Expressing the mode HERE, where the deadline is armed, rather than at
+      // the places that read it, is deliberate. `Controller.require()`,
+      // `status()`, `matchesFor()` and `syncAttempt()` each settle the
+      // deadline before touching session state, and F-4 was found at those
+      // sites twice. A mode that gives them a fifth thing to remember is that
+      // defect's third chance; "the deadline is never armed" asks nothing of
+      // them at all.
       this.lockDeadlineMs = null;
       this.armedAtMs = null;
       return;

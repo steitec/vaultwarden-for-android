@@ -435,5 +435,58 @@ describe("Session", () => {
         vi.useRealTimers();
       }
     });
+
+    // The mode overrides the timeout; it does not overwrite it. A year of
+    // wall-clock time with nothing running is the frozen-process case from
+    // F-4, which in "pin" mode locks and here must not.
+    it("arms no deadline in session mode", async () => {
+      vi.useFakeTimers();
+      try {
+        const state: StoredState = {
+          ...(await baseState()),
+          unlockMode: "session",
+          pinWrapped: null,
+        };
+        await session.init();
+        await session.adoptLogin(state, {
+          userKey: {
+            encKey: new Uint8Array(32).fill(7),
+            macKey: new Uint8Array(32).fill(8),
+          },
+          orgKeys: new Map(),
+          accessToken: "token",
+        });
+        expect(session.state).toBe("unlocked");
+
+        vi.setSystemTime(Date.now() + 365 * 24 * 60 * 60 * 1000);
+        session.lockIfExpired();
+
+        expect(session.state).toBe("unlocked");
+        expect(session.userKey).not.toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("keeps the timeout setting while the mode overrides it", async () => {
+      const state: StoredState = {
+        ...(await baseState()),
+        unlockMode: "session",
+        pinWrapped: null,
+        lockTimeoutMinutes: 5,
+      };
+      await session.init();
+      await session.adoptLogin(state, {
+        userKey: {
+          encKey: new Uint8Array(32).fill(7),
+          macKey: new Uint8Array(32).fill(8),
+        },
+        orgKeys: new Map(),
+        accessToken: "token",
+      });
+
+      expect(session.settings?.lockTimeoutMinutes).toBe(5);
+      expect(session.unlockMode).toBe("session");
+    });
   });
 });
