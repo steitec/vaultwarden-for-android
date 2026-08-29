@@ -2,6 +2,7 @@ import { Session, MAX_PIN_ATTEMPTS } from "../session/session";
 import {
   DEFAULT_LOCK_TIMEOUT_MINUTES,
   DEFAULT_REQUIRE_MASTER_PASSWORD_ON_RESTART,
+  DEFAULT_UNLOCK_MODE,
   type StoredState,
 } from "../session/store";
 import { decryptVault, searchItems, matchItems, type VaultItem } from "../vault/index";
@@ -297,6 +298,7 @@ export class Controller {
         lastSyncMs: Date.now(),
         lockTimeoutMinutes: DEFAULT_LOCK_TIMEOUT_MINUTES,
         requireMasterPasswordOnRestart: DEFAULT_REQUIRE_MASTER_PASSWORD_ON_RESTART,
+        unlockMode: DEFAULT_UNLOCK_MODE,
       };
       await this.session.adoptLogin(state, {
         userKey: r.userKey,

@@ -1,6 +1,25 @@
 import type { KdfConfig } from "../crypto/kdf";
 import type { PinWrapped } from "./pin";
 
+/**
+ * How this account is unlocked.
+ *
+ * `"pin"` is the default and the shipped behaviour: a PIN-wrapped key on
+ * disk, and an idle deadline.
+ *
+ * `"session"` is opt-in: no PIN-wrapped key at all, and no idle deadline.
+ * The master password, once per Firefox start, is the only way in. Nothing
+ * extra is written to disk — the user key stays in the background page's
+ * memory exactly as it does today, so an extracted storage image is still
+ * protected by the master password.
+ *
+ * An explicit field rather than an inference from `pinWrapped === null &&
+ * lockTimeoutMinutes === 0`: `pinWrapped` is also cleared by an ATTACK path,
+ * the five-attempt lockout in `Session.unlockWithPin`. A security posture
+ * must not be derivable from a coincidence an attacker can arrange.
+ */
+export type UnlockMode = "pin" | "session";
+
 export type StoredState = {
   serverUrl: string;
   email: string;
@@ -18,6 +37,7 @@ export type StoredState = {
   lastSyncMs: number | null;
   lockTimeoutMinutes: number;
   requireMasterPasswordOnRestart: boolean;
+  unlockMode: UnlockMode;
 };
 
 /**
@@ -27,6 +47,7 @@ export type StoredState = {
  */
 export const DEFAULT_LOCK_TIMEOUT_MINUTES = 15;
 export const DEFAULT_REQUIRE_MASTER_PASSWORD_ON_RESTART = false;
+export const DEFAULT_UNLOCK_MODE: UnlockMode = "pin";
 
 export type StateStore = {
   load(): Promise<StoredState | null>;
@@ -36,10 +57,29 @@ export type StateStore = {
 
 const KEY = "state";
 
+/**
+ * Fills in fields added after a record was written, before it reaches the
+ * guard.
+ *
+ * Deliberately separate from `isStoredState`, which stays strict: "old but
+ * valid" and "corrupt" are different answers and must stay separately
+ * readable. A record from 0.1.0 has no `unlockMode`; without this it fails
+ * validation, `load()` answers null, and the add-on presents the setup
+ * screen to someone whose vault is still there.
+ *
+ * The upgraded value is not written back here. The next `update()` persists
+ * it, and a read has no business writing.
+ */
+function withDefaults(value: unknown): unknown {
+  if (typeof value !== "object" || value === null) return value;
+  if ("unlockMode" in value) return value;
+  return { ...value, unlockMode: DEFAULT_UNLOCK_MODE };
+}
+
 export const browserStore: StateStore = {
   async load() {
     const r = await browser.storage.local.get(KEY);
-    const value: unknown = r[KEY];
+    const value: unknown = withDefaults(r[KEY]);
     return isStoredState(value) ? value : null;
   },
   async save(state) {
@@ -79,6 +119,10 @@ function isKdfConfig(v: unknown): v is KdfConfig {
     (v.parallelism === null || isFiniteNumber(v.parallelism)) &&
     isNullableString(v.salt)
   );
+}
+
+function isUnlockMode(v: unknown): v is UnlockMode {
+  return v === "pin" || v === "session";
 }
 
 function isPinWrapped(v: unknown): v is PinWrapped {
@@ -130,7 +174,8 @@ export function isStoredState(v: unknown): v is StoredState {
     !("cipherCache" in v) ||
     !("lastSyncMs" in v) ||
     !("lockTimeoutMinutes" in v) ||
-    !("requireMasterPasswordOnRestart" in v)
+    !("requireMasterPasswordOnRestart" in v) ||
+    !("unlockMode" in v)
   ) {
     return false;
   }
@@ -149,6 +194,7 @@ export function isStoredState(v: unknown): v is StoredState {
     isNullableString(v.cipherCache) &&
     (v.lastSyncMs === null || isFiniteNumber(v.lastSyncMs)) &&
     isFiniteNumber(v.lockTimeoutMinutes) &&
-    typeof v.requireMasterPasswordOnRestart === "boolean"
+    typeof v.requireMasterPasswordOnRestart === "boolean" &&
+    isUnlockMode(v.unlockMode)
   );
 }
