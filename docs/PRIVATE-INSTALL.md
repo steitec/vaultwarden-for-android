@@ -166,10 +166,16 @@ be longer when AMO is busy. The command waits and then prints where it put the
 file:
 
 ```
-web-ext-artifacts/vaultwarden_for_android-0.1.0.xpi
+web-ext-artifacts/6f42eec3553e46c2b948-0.1.0.xpi
 ```
 
 That `.xpi` is the signed add-on. It is the deliverable of this whole document.
+
+**The name is AMO's, not yours.** The leading string is assigned by the signing
+service and has nothing to do with the package name in `package.json`; only the
+`-<version>.xpi` tail is predictable. Do not hardcode it anywhere — the commands
+below pick the newest `.xpi` in the directory instead, which is why they keep
+working next version.
 
 `web-ext-artifacts/` is gitignored, so the file is safely outside version
 control — but it is also *not backed up*. Copy it somewhere you keep things if
@@ -185,7 +191,9 @@ cannot be taken back.
 Cleanest, with the phone connected by USB and debugging on:
 
 ```bash
-adb push web-ext-artifacts/vaultwarden_for_android-0.1.0.xpi /sdcard/Download/
+XPI=$(ls -t web-ext-artifacts/*.xpi | head -1)
+echo "$XPI"          # check it is the one you just signed
+adb push "$XPI" /sdcard/Download/
 ```
 
 Anything else that lands the file in the phone's storage works too — a USB file
@@ -206,7 +214,8 @@ it is simply not shown until you unlock it.
    there is now **Install add-on from file** (some versions word it *Install
    extension from file*).
 5. Tap it. Android's file picker opens. Navigate to **Downloads** and pick
-   `vaultwarden_for_android-0.1.0.xpi`.
+   the `.xpi` you pushed — the name AMO gave it, ending `-0.1.0.xpi`. Sorting
+   the picker by date is the quickest way to find it.
 6. Firefox shows the permission prompt — access to data for all websites, per the
    manifest's `https://*/*` content script. Confirm.
 
