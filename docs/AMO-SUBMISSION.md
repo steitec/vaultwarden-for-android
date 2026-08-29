@@ -15,7 +15,7 @@ npx web-ext build -s dist --overwrite-dest
 ```
 
 The artifact lands in `web-ext-artifacts/vaultwarden_for_android-<version>.zip`
-(about 80 KB). `web-ext-artifacts/` is gitignored.
+(about 90 KB). `web-ext-artifacts/` is gitignored.
 
 Confirm the zip contains exactly these eight files and nothing else — no tests,
 no fixtures, no source maps, no `node_modules`:
@@ -100,10 +100,11 @@ git archive --format=zip -o source.zip HEAD
 `git archive` exports **tracked files only**, so `node_modules/`, `dist/`,
 `web-ext-artifacts/` and the planning directory are all excluded automatically.
 What it does contain: `src/`, `tests/` (including `tests/fixtures/`), `scripts/`,
-`docs/`, `package.json`, `package-lock.json`, `tsconfig.json`, and the two vitest
-configs — roughly 90 files, about 1 MB.
+`docs/` (the design specs under `docs/superpowers/` included), `package.json`,
+`package-lock.json`, `tsconfig.json`, `.gitignore`, and the two vitest configs —
+roughly 110 files, about 430 KB zipped and 1.3 MB unpacked.
 
-Do not commit `source.zip`.
+`source.zip` is gitignored, so it cannot be committed by accident.
 
 ### Build instructions for the reviewer
 
@@ -143,12 +144,17 @@ Include this text:
 >
 > **Permissions**
 >
-> `storage` holds the account record in `browser.storage.local`: the server URL
-> and email, the server's own encrypted user key and private key, the refresh
-> token encrypted under the user key, the PIN-wrapped user key, and the last
-> sync response cached exactly as the server returned it — that is, still in the
-> server's ciphertext. Nothing is stored in plaintext that the server did not
-> already send in plaintext.
+> `storage` holds the account record in `browser.storage.local`, and this is the
+> whole of it (`StoredState` in `src/session/store.ts`): the server URL and
+> email, the server's own encrypted user key and private key, the refresh token
+> encrypted under the user key, the PIN-wrapped user key, and the last sync
+> response cached as the server returned it — that is, still in the server's
+> ciphertext. Alongside those, six non-secret fields: a device id generated
+> locally with `crypto.randomUUID()` and sent to the user's own server at login
+> as Bitwarden's protocol requires, the server's own KDF parameters, the failed
+> PIN counter, the time of the last sync, and the two settings (idle timeout,
+> and whether a restart demands the master password). Nothing is stored in
+> plaintext that the server did not already send in plaintext.
 >
 > **Page access.** The manifest requests `https://*/*`, `http://localhost/*`
 > and `http://127.0.0.1/*`, and registers one content script on exactly those
@@ -199,7 +205,9 @@ Include this text:
 > address must be https — a plain-http server is refused at setup, before
 > anything is sent, because sign-in posts the derived master password hash to it
 > and every sync carries a bearer token to it. The two loopback patterns are for
-> filling into locally served pages; a loopback address is refused as a server.
+> filling into locally served pages, and the server address gets no loopback
+> exemption in return: http is refused there even for `localhost`, where the
+> page-filling rule does allow it.
 >
 > **Cryptography** uses WebCrypto throughout: PBKDF2-HMAC-SHA256 and SHA-256 for
 > the account key derivation, HKDF-Expand (implemented over WebCrypto HMAC-SHA256,
