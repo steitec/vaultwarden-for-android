@@ -47,6 +47,7 @@ function lockoutResponder(): (req: unknown) => unknown {
         serverUrl: "https://vault.example.net",
         pinUnlockAvailable: failed < 5,
         pinAttemptsRemaining: Math.max(0, 5 - failed),
+        unlockMode: "pin",
       };
       return s;
     }

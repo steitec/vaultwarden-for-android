@@ -63,6 +63,7 @@ function status(over: Partial<Status> = {}): Status {
     serverUrl: "https://vault.example.net",
     pinUnlockAvailable: true,
     pinAttemptsRemaining: 5,
+    unlockMode: "pin",
     ...over,
   };
 }
@@ -777,6 +778,26 @@ describe("failure handling", () => {
         serverUrl: null,
         pinUnlockAvailable: true,
         pinAttemptsRemaining: Number.NaN,
+      },
+      // Complete but for the unlock mode. The settings panel draws a security
+      // switch from it, so a default invented here would show a position the
+      // background page never reported.
+      {
+        state: "locked",
+        lastSyncMs: null,
+        email: null,
+        serverUrl: null,
+        pinUnlockAvailable: true,
+        pinAttemptsRemaining: 5,
+      },
+      {
+        state: "locked",
+        lastSyncMs: null,
+        email: null,
+        serverUrl: null,
+        pinUnlockAvailable: true,
+        pinAttemptsRemaining: 5,
+        unlockMode: "none",
       },
     ]) {
       document.body.innerHTML = SKELETON;

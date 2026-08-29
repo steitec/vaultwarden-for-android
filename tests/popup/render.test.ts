@@ -34,6 +34,7 @@ function status(over: Partial<Status> = {}): Status {
     serverUrl: "https://vault.example.net",
     pinUnlockAvailable: true,
     pinAttemptsRemaining: 5,
+    unlockMode: "pin",
     ...over,
   };
 }

@@ -150,6 +150,11 @@ function isStatus(v: unknown): v is Status {
   if (!("pinAttemptsRemaining" in v)) return false;
   if (typeof v.pinAttemptsRemaining !== "number" || !Number.isFinite(v.pinAttemptsRemaining))
     return false;
+  // Same reasoning as the two above: the settings panel draws a security
+  // switch from this, and a default invented here would draw it in a position
+  // the background page never reported.
+  if (!("unlockMode" in v)) return false;
+  if (v.unlockMode !== "pin" && v.unlockMode !== "session") return false;
   return true;
 }
 
