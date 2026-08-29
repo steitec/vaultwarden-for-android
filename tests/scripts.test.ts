@@ -83,3 +83,22 @@ describe("package and sign scripts", () => {
     expect(ignored.split("\n").map((l) => l.trim())).toContain("source.zip");
   });
 });
+
+describe("published package metadata", () => {
+  it("declares the licence the repository actually ships under", () => {
+    // Without this field the package claims nothing, and a repository that
+    // claims nothing is all-rights-reserved however public it is.
+    expect((pkg as Record<string, unknown>).license).toBe("GPL-3.0-only");
+  });
+
+  it("is not marked private, which would contradict the licence beside it", () => {
+    // `"private": true` was a note to the author while this lived on one NAS.
+    // Left in place it reads as a refusal to publish, sitting next to a
+    // licence whose entire purpose is to permit it.
+    expect(pkg).not.toHaveProperty("private");
+  });
+
+  it("is named for the repository it lives in", () => {
+    expect((pkg as Record<string, unknown>).name).toBe("vaultwarden-for-android");
+  });
+});
