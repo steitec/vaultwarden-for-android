@@ -1,6 +1,6 @@
 import type { SymKey } from "../crypto/encstring";
 import { zero } from "../crypto/bytes";
-import { unwrapKeyWithPin } from "./pin";
+import { unwrapKeyWithPin, wrapKeyWithPin } from "./pin";
 import { DEFAULT_UNLOCK_MODE, type StateStore, type StoredState, type UnlockMode } from "./store";
 
 export const MAX_PIN_ATTEMPTS = 5;
@@ -236,6 +236,47 @@ export class Session {
     this.stored.failedPinAttempts = 0;
     await this.store.save(this.stored);
     this.state = "unlocked";
+    this.touch();
+  }
+
+  /**
+   * Turns the PIN off: no wrapped key on disk, and no idle deadline.
+   *
+   * Only from an unlocked session. Both switches need the live user key —
+   * this one to be sure the caller is entitled to make the change at all,
+   * and `usePinUnlock` to have something to wrap.
+   *
+   * The wrapped key is DISCARDED rather than kept for later. Leaving it
+   * would keep the weakest thing on disk — six digits, roughly 20 bits,
+   * behind Argon2id — while the interface says there is no PIN.
+   * `failedPinAttempts` goes with it, so no stale counter survives to meet a
+   * future PIN.
+   *
+   * `touch()` afterwards is what clears a deadline that is already running.
+   */
+  async useSessionUnlock(): Promise<void> {
+    if (this.state !== "unlocked") throw new Error("Unlock the vault first");
+    await this.update({ unlockMode: "session", pinWrapped: null, failedPinAttempts: 0 });
+    this.touch();
+  }
+
+  /**
+   * Turns the PIN back on, wrapping the live user key under a new one.
+   *
+   * `wrapKeyWithPin` runs BEFORE anything is written, so a PIN that is too
+   * short leaves the account exactly as it was — the same ordering the setup
+   * screen already documents for its own PIN field.
+   *
+   * `touch()` afterwards re-arms the deadline from `lockTimeoutMinutes`,
+   * which was preserved across the excursion rather than zeroed, so the
+   * user's own timeout comes back without their having to set it again.
+   */
+  async usePinUnlock(pin: string): Promise<void> {
+    if (this.state !== "unlocked" || this.userKey === null) {
+      throw new Error("Unlock the vault first");
+    }
+    const pinWrapped = await wrapKeyWithPin(this.userKey, pin);
+    await this.update({ unlockMode: "pin", pinWrapped, failedPinAttempts: 0 });
     this.touch();
   }
 
