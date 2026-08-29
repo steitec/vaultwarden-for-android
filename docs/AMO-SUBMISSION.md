@@ -17,6 +17,12 @@ npx web-ext build -s dist --overwrite-dest
 The artifact lands in `web-ext-artifacts/vaultwarden_for_android-<version>.zip`
 (about 90 KB). `web-ext-artifacts/` is gitignored.
 
+`npm run package` does the first four of those steps and writes `source.zip`
+besides, refusing to run on a dirty working tree. It stops short of
+`web-ext build`, because the listed route uploads through the dashboard rather
+than from a zip on disk. There is deliberately no `sign:listed` script — see
+`docs/DEVELOPMENT.md` → "Signing and submission".
+
 Confirm the zip contains exactly these eight files and nothing else — no tests,
 no fixtures, no source maps, no `node_modules`:
 
