@@ -65,33 +65,16 @@ warned about. See `docs/DEVELOPMENT.md` → "The AMO reviewer note, reviewed
 It is worth doing again before each submission rather than once: this pass
 found a sentence that was the mirror image of the code it described.
 
-### 2.2 Build the `package` / `sign` scripts
+### 2.2 ~~Build the `package` / `sign` scripts~~ — done 2026-08-29
 
-Designed and agreed on 2026-08-25, deliberately not built. The design, and why it
-is two scripts rather than one, is in `docs/DEVELOPMENT.md` → "Signing and
-submission: designed, not built". One point in it is open on purpose: the script
-hardcodes `--channel=listed`, but the route needed first is `--channel=unlisted`
-(`docs/PRIVATE-INSTALL.md`).
+Built as `package` and `sign:unlisted`, with the channel in the script name and
+a clean-tree check in `package`. Both departures from the 2026-08-25 design are
+argued in `docs/DEVELOPMENT.md` → "Signing and submission". `tests/scripts.test.ts`
+pins what makes them safe.
 
-### 2.3 Pick a licence and put it in the repository
-
-There is no `LICENSE` or `COPYING` file, and `package.json` carries no `license`
-field — only `"private": true`, which is a different thing (it stops an
-accidental `npm publish` and says nothing about the terms). Without a stated
-licence the default is "all rights reserved", which sits badly with a listed
-AMO add-on whose source archive is uploaded for review and, for a listed
-listing, shown with a licence on its page.
-
-Independent of everything else in this section — it can be done at
-any point, and it is a decision rather than work.
-
-The decision worth making deliberately, since it is the same question
-monetisation ran into on 2026-08-26: a permissive licence (MIT, BSD) lets anyone
-redistribute and repackage, a copyleft one (GPL, AGPL) lets them fork but
-requires they publish their changes. Neither prevents a fork — an add-on ships
-as readable JavaScript with its source archive attached, so "nobody can take
-this" is not on the table whichever is chosen. Pick for what should happen to
-the changes, not for control.
+There is deliberately **no `sign:listed` script**. Writing one is the act that
+makes a public submission possible, and it should be a decision rather than a
+line that is already there.
 
 ---
 

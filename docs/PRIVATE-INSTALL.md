@@ -95,32 +95,45 @@ deliberately; decide it when you next touch the manifest.
 
 ```bash
 npm ci
-npm test
-npm run build
-npm run lint:ext
+npm run package
 ```
 
-`lint:ext` must report **0 errors, 0 warnings, 0 notices**. Anything else, stop
-and understand it — see `docs/AMO-SUBMISSION.md`.
+`package` is the harmless half: it builds, lints, and writes `source.zip` from
+`HEAD`. It touches no network and submits nothing, so it is safe to run as often
+as you like.
 
-Then the source archive, from the exact commit you are signing:
+It **refuses to run on a dirty working tree**, and that is not fussiness.
+`source.zip` comes from `HEAD` while `dist/` is built from the working tree, so
+with uncommitted changes the two would describe different code — and the source
+archive is the thing a reviewer reads to decide whether the bundled JavaScript is
+honest. Commit or stash, then run it again.
 
-```bash
-git archive --format=zip -o source.zip HEAD
-```
+`lint:ext` runs inside it and must report **0 errors, 0 warnings, 0 notices**.
+Anything else, stop and understand it — see `docs/AMO-SUBMISSION.md`.
 
 Unlisted submissions go through automated review, which does not normally ask for
-source. Attach it anyway: the shipped JavaScript is Rollup output, AMO reviewers
-*can* pull an unlisted add-on for human review, and attaching source up front
-costs nothing and removes the one thing that would otherwise stall you.
+source. It is attached anyway: the shipped JavaScript is Rollup output, AMO
+reviewers *can* pull an unlisted add-on for human review, and attaching source up
+front costs nothing and removes the one thing that would otherwise stall you.
 
-`source.zip` is not in `.gitignore`. Do not commit it.
+`source.zip` is gitignored, so it cannot be committed by accident.
 
 ## Step 4 — Sign it, unlisted
 
 ```bash
-npx web-ext sign -s dist --channel=unlisted --upload-source-code=source.zip
+npm run sign:unlisted
 ```
+
+That runs the suite, then `package`, then:
+
+```bash
+web-ext sign -s dist --channel=unlisted --upload-source-code=source.zip
+```
+
+The channel is in the **script name**, not only in a flag. There is deliberately
+no bare `npm run sign`: today it would mean unlisted, and the day a listed
+submission is wanted the same muscle memory would submit for public review
+instead.
 
 What happens: `web-ext` uploads `dist/`, AMO runs the automated validator, and —
 if it passes — signs the package and sends it back. Usually a few minutes; it can
