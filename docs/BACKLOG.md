@@ -110,6 +110,22 @@ eventually be somebody's bug report. Full write-ups in `docs/DEVELOPMENT.md` →
 
 ---
 
+## 3.1 Licence notice missing from the built bundle
+
+Found 2026-08-29 while licensing the repository for publication. `hash-wasm` is
+MIT and is bundled into `dist/background.js`; its copyright notice does not
+survive the bundler, so a signed XPI redistributes the code without the notice
+MIT requires to accompany it.
+
+`THIRD-PARTY-NOTICES.md` covers the repository. It does not cover the artefact,
+which is what actually gets distributed. The fix is a banner preserved through
+the build — `esbuild.legalComments` or an explicit banner in `scripts/build.mjs`
+— and it was deliberately not done during the publication work, because changing
+what the build emits days after a signed build went onto a phone is a change
+that wants its own verification rather than a footnote in someone else's task.
+
+---
+
 ## 4. Deferred to v2
 
 Unchanged and still just a list, kept in `docs/DEVELOPMENT.md` → "Deferred to
