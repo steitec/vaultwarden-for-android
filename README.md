@@ -28,6 +28,11 @@ Requires Firefox 121 or newer. Tested against Vaultwarden 1.37.1.
   including two-step login.
 - Derives keys with PBKDF2 or Argon2id, whichever the server asks for.
 - Unlocks with a PIN afterwards, so the master password is typed rarely.
+- Or, if you turn the PIN off in the settings, unlocks once per Firefox start
+  with the master password and then stays open — no PIN and no idle lock. The
+  user key is still never written to disk, so an extracted copy of the phone's
+  storage is protected exactly as it is otherwise; what you give up is the
+  lock on a phone someone else is holding. `SECURITY.md` says it in full.
 - Draws a badge inside a page's password field and fills username and password
   on a tap.
 - Matches entries by registrable domain, so an entry saved for `example.com` is
@@ -70,8 +75,9 @@ reporting route.
 - A password reaches a page only through the fill script, addressed to a single
   tab, in response to a tap.
 - `browser.storage.local` holds the account record. Everything secret in it is
-  ciphertext the server itself produced, plus the PIN-wrapped user key. Nothing
-  is stored in plaintext that the server did not already send in plaintext.
+  ciphertext the server itself produced, plus the PIN-wrapped user key — which
+  an account set to unlock without a PIN does not have at all. Nothing is
+  stored in plaintext that the server did not already send in plaintext.
 - Five wrong PINs exhaust the PIN: the next attempt is refused rather than
   tried, the PIN-wrapped key is discarded, and the master password becomes the
   only way back in.

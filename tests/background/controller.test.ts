@@ -168,6 +168,7 @@ async function makeController(overrides: Partial<StoredState> = {}): Promise<Har
     lastSyncMs: 1000,
     lockTimeoutMinutes: 15,
     requireMasterPasswordOnRestart: false,
+    unlockMode: "pin",
     ...overrides,
   };
 
@@ -346,6 +347,31 @@ describe("Controller", () => {
     const afterRestart = await makeController({ requireMasterPasswordOnRestart: true });
     expect(afterRestart.controller.status().pinUnlockAvailable).toBe(false);
   }, 30000);
+
+  it("reports the account's unlock mode", async () => {
+    const { controller, session } = await makeController();
+    await controller.unlock(PIN);
+    expect(controller.status().unlockMode).toBe("pin");
+
+    await session.useSessionUnlock();
+    expect(controller.status().unlockMode).toBe("session");
+  }, 20000);
+
+  it("refuses a mode change on a locked vault", async () => {
+    const { controller, stored } = await makeController();
+    await expect(controller.setUnlockMode("session")).rejects.toBeInstanceOf(LockedError);
+    expect(stored()?.unlockMode).toBe("pin");
+  }, 20000);
+
+  it("refuses to turn the PIN on without one", async () => {
+    const { controller, session, stored } = await makeController();
+    await controller.unlock(PIN);
+    await session.useSessionUnlock();
+
+    await expect(controller.setUnlockMode("pin")).rejects.toThrow(/PIN/i);
+    expect(stored()?.unlockMode).toBe("session");
+    expect(stored()?.pinWrapped).toBeNull();
+  }, 20000);
 
   it("counts the PIN attempts that are actually left", async () => {
     // Session charges the attempt BEFORE trying it and gives up once
