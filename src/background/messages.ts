@@ -106,7 +106,8 @@ export type Request =
       pin: string;
       twoFactor?: { token: string; provider: number };
     }
-  | { kind: "sync" };
+  | { kind: "sync" }
+  | { kind: "setUnlockMode"; mode: UnlockMode; pin?: string };
 
 /** `void` covers the kinds that answer with an acknowledgement only. */
 export type Response = Status | ItemSummary[] | PageMatches | TotpCode | SetupResult | void;
@@ -190,6 +191,17 @@ export function isRequest(v: unknown): v is Request {
       return "itemId" in v && isString(v.itemId);
     case "totp":
       return "itemId" in v && isString(v.itemId);
+    case "setUnlockMode":
+      // `mode` is checked against the two literals rather than "is a string":
+      // an unknown mode reaching the controller would be a silent no-op at
+      // best. `pin` is optional — absent when turning the PIN off, required
+      // by the controller when turning it on — but a present one must be a
+      // string, because it goes straight into the KDF.
+      return (
+        "mode" in v &&
+        (v.mode === "pin" || v.mode === "session") &&
+        (!("pin" in v) || v.pin === undefined || isString(v.pin))
+      );
     default:
       return false;
   }

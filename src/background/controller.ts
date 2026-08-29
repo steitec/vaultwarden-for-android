@@ -4,6 +4,7 @@ import {
   DEFAULT_REQUIRE_MASTER_PASSWORD_ON_RESTART,
   DEFAULT_UNLOCK_MODE,
   type StoredState,
+  type UnlockMode,
 } from "../session/store";
 import { decryptVault, searchItems, matchItems, type VaultItem } from "../vault/index";
 import { uriMatches } from "../vault/uri-match";
@@ -176,6 +177,24 @@ export class Controller {
     await this.session.unlockWithPin(pin);
     await this.loadFromCache();
     await this.redeemPending();
+  }
+
+  /**
+   * Changes how this account unlocks.
+   *
+   * `require("user")` first, for its guard rather than its result: an
+   * unlocked vault is what both switches need, and routing through it settles
+   * the idle deadline the same way every other user-driven call does. A
+   * locked vault gets a LockedError rather than a silent refusal.
+   */
+  async setUnlockMode(mode: UnlockMode, pin?: string): Promise<void> {
+    this.require("user");
+    if (mode === "session") {
+      await this.session.useSessionUnlock();
+      return;
+    }
+    if (pin === undefined) throw new Error("A PIN is needed to turn the PIN back on");
+    await this.session.usePinUnlock(pin);
   }
 
   /** Records a badge tap made against a locked vault. */

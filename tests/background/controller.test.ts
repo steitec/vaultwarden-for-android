@@ -357,6 +357,22 @@ describe("Controller", () => {
     expect(controller.status().unlockMode).toBe("session");
   }, 20000);
 
+  it("refuses a mode change on a locked vault", async () => {
+    const { controller, stored } = await makeController();
+    await expect(controller.setUnlockMode("session")).rejects.toBeInstanceOf(LockedError);
+    expect(stored()?.unlockMode).toBe("pin");
+  }, 20000);
+
+  it("refuses to turn the PIN on without one", async () => {
+    const { controller, session, stored } = await makeController();
+    await controller.unlock(PIN);
+    await session.useSessionUnlock();
+
+    await expect(controller.setUnlockMode("pin")).rejects.toThrow(/PIN/i);
+    expect(stored()?.unlockMode).toBe("session");
+    expect(stored()?.pinWrapped).toBeNull();
+  }, 20000);
+
   it("counts the PIN attempts that are actually left", async () => {
     // Session charges the attempt BEFORE trying it and gives up once
     // failedPinAttempts exceeds MAX_PIN_ATTEMPTS, so a stored count of n
