@@ -39,8 +39,11 @@ the same 210-minute deadline that left the old build unlocked after eight hours:
 the popup showed the PIN pad. Same process throughout, so the lock was the
 deadline and not a restart.
 
-Full trail in `docs/VERIFICATION-2026-08-25.md` § F-4; design in
-`docs/superpowers/specs/2026-08-28-idle-lock-deadline-design.md`.
+Full trail in `docs/VERIFICATION-2026-08-25.md` § F-4. The shape of the fix, in
+one sentence: the lock stores a **deadline** rather than arming a timer, and
+that deadline is read at the four call sites that touch session state —
+`Controller.require()`, `status()`, `matchesFor()` and `syncAttempt()`. Nothing
+has to fire, so nothing can fail to fire on a frozen process.
 
 ---
 
@@ -111,8 +114,9 @@ eventually be somebody's bug report. Full write-ups in `docs/DEVELOPMENT.md` →
 
 Unchanged and still just a list, kept in `docs/DEVELOPMENT.md` → "Deferred to
 v2": item creation and editing, save-password prompts, Sends and attachments,
-card and identity types, passkeys, multiple accounts, WebSocket push sync, a full
-public suffix list, and a TOTP display in the popup.
+card and identity types, passkeys, multiple accounts, WebSocket push sync, a
+refresh mechanism for the embedded public suffix list (the list itself is
+complete; it is a build-time snapshot), and a TOTP display in the popup.
 
 ---
 

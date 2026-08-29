@@ -608,8 +608,15 @@ permission was added, so `docs/AMO-SUBMISSION.md` is unaffected.
 
 The test that pins it advances the system clock without advancing timers — the
 frozen process exactly, and the reason none of the 626 tests standing on the
-night of this run had caught it. Design in
-`docs/superpowers/specs/2026-08-28-idle-lock-deadline-design.md`.
+night of this run had caught it.
+
+The mechanism, since the design document is not part of the published
+repository: the session stores the moment it expires instead of arming a timer
+for it, and every path that reads session state settles the deadline first —
+`Controller.require()`, `status()`, `matchesFor()` and `syncAttempt()`. The last
+two were each found in review rather than in design, on the same defect twice,
+because a method that reads session state without going through `require()`
+needs its own call.
 
 #### Confirmed on the device, night of 2026-08-28/29
 

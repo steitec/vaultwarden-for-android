@@ -4,9 +4,8 @@ Date: 2026-08-25
 Status: Implemented on branch `feat/autofill-badge`; §8 and §12 closed by
 on-device verification on 2026-08-25
 
-**Supersedes §7.1 of `2026-08-06-vaultwarden-firefox-android-addon-design.md`**
-("activeTab, not host permissions"). That section is the deliberate decision this
-design reverses; §9 below states what is given up and what is kept.
+**Supersedes the original design's "activeTab, not host permissions" decision**,
+which this design reverses; §9 below states what is given up and what is kept.
 
 ## 1. Motivation
 
