@@ -88,6 +88,7 @@ function makeSpies(c: Controller) {
         serverUrl: "https://v.example.net",
         pinUnlockAvailable: true,
         pinAttemptsRemaining: 5,
+        unlockMode: "pin",
       }),
     unlock: vi.spyOn(c, "unlock").mockResolvedValue(undefined),
     lock: vi.spyOn(c, "lock").mockReturnValue(undefined),
@@ -171,6 +172,7 @@ describe("handleMessage sender verification", () => {
       serverUrl: "https://v.example.net",
       pinUnlockAvailable: true,
       pinAttemptsRemaining: 5,
+      unlockMode: "pin",
     });
     expect(spies.status).toHaveBeenCalled();
   });
@@ -568,6 +570,7 @@ describe("handOff", () => {
     serverUrl: "https://v.example.net",
     pinUnlockAvailable: true,
     pinAttemptsRemaining: 5,
+    unlockMode: "pin",
   } as const;
   const UNLOCKED_STATUS = { ...LOCKED_STATUS, state: "unlocked" } as const;
 

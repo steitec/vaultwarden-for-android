@@ -348,6 +348,15 @@ describe("Controller", () => {
     expect(afterRestart.controller.status().pinUnlockAvailable).toBe(false);
   }, 30000);
 
+  it("reports the account's unlock mode", async () => {
+    const { controller, session } = await makeController();
+    await controller.unlock(PIN);
+    expect(controller.status().unlockMode).toBe("pin");
+
+    await session.useSessionUnlock();
+    expect(controller.status().unlockMode).toBe("session");
+  }, 20000);
+
   it("counts the PIN attempts that are actually left", async () => {
     // Session charges the attempt BEFORE trying it and gives up once
     // failedPinAttempts exceeds MAX_PIN_ATTEMPTS, so a stored count of n
