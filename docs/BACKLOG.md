@@ -34,6 +34,11 @@ Both questions this entry left open are answered: no persistence is needed,
 because `init()` already locks a session that outlived its background page; and
 no permission is added, so the AMO note in § 2.1 is unaffected by this change.
 
+**Confirmed on the device the night of 2026-08-28/29**, against the same rig and
+the same 210-minute deadline that left the old build unlocked after eight hours:
+the popup showed the PIN pad. Same process throughout, so the lock was the
+deadline and not a restart.
+
 Full trail in `docs/VERIFICATION-2026-08-25.md` § F-4; design in
 `docs/superpowers/specs/2026-08-28-idle-lock-deadline-design.md`.
 
