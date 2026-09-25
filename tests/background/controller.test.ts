@@ -305,6 +305,7 @@ describe("Controller", () => {
 
     const items = await controller.list("");
     expect(Object.keys(items[0]!).sort()).toEqual([
+      "editable",
       "hasTotp",
       "id",
       "name",
@@ -676,6 +677,43 @@ describe("Controller", () => {
       await h.controller.unlock(PIN);
       return h;
     }
+
+    it("refreshes and retries exactly once when the server rejects the access token", async () => {
+      const h = await unlockedWithRefreshToken();
+      const calls: string[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string) => {
+          calls.push(url);
+          if (!url.includes("/api/sync")) {
+            return {
+              ok: true,
+              status: 200,
+              json: async () => ({ access_token: "at", refresh_token: "rt2", expires_in: 3600 }),
+              text: async () => "",
+            };
+          }
+          const firstSync = calls.filter((c) => c.includes("/api/sync")).length === 1;
+          return firstSync
+            ? { ok: false, status: 401, json: async () => ({}), text: async () => "" }
+            : {
+                ok: true,
+                status: 200,
+                json: async () => JSON.parse(await cacheOf(DEFAULT_SEEDS)),
+                text: async () => "",
+              };
+        }),
+      );
+
+      await h.controller.syncNow();
+
+      // Twice, never three times: a retry that can recurse turns a server
+      // rejecting every token into an infinite loop.
+      expect(calls.filter((c) => c.includes("/api/sync"))).toHaveLength(2);
+      expect(
+        calls.filter((c) => c.includes("/identity/connect/token")).length,
+      ).toBeGreaterThanOrEqual(1);
+    }, 20000);
 
     it("replaces the cache with a freshly synced vault", async () => {
       const h = await unlockedWithRefreshToken();
@@ -1340,4 +1378,142 @@ describe("pending fill", () => {
     await expect(controller.unlock(PIN)).resolves.not.toThrow();
     expect(controller.status().state).toBe("unlocked");
   }, 20000);
+});
+
+describe("writing items", () => {
+  const draft = { name: "Renamed", username: "octocat", uri: "https://github.com", password: null };
+
+  /** The default vault plus one organization item, unlocked and able to reach a server. */
+  async function writable(): Promise<Harness> {
+    const org = await makeOrg("org-1");
+    const h = await makeController({
+      protectedPrivateKey: (await rsa()).protectedPrivateKey,
+      wrappedRefreshToken: await encryptToString(utf8("rt"), userKey),
+      cipherCache: await cacheOf(
+        [
+          ...DEFAULT_SEEDS,
+          { id: "org1", name: "Org Item", uris: ["https://org.example"], orgId: "org-1" },
+        ],
+        [org],
+      ),
+    });
+    await h.controller.unlock(PIN);
+    return h;
+  }
+
+  /** Answers the token endpoint and /api/sync, and records every call. */
+  function recordingServer(calls: { url: string; method?: string }[], writeStatus = 200) {
+    return vi.fn(async (url: string, init?: { method?: string }) => {
+      const isWrite = url.includes("/api/ciphers");
+      calls.push({ url, method: init?.method });
+      const ok = isWrite ? writeStatus >= 200 && writeStatus < 300 : true;
+      return {
+        ok,
+        status: isWrite ? writeStatus : 200,
+        json: async () =>
+          url.includes("/identity/")
+            ? { access_token: "at", refresh_token: "rt2", expires_in: 3600 }
+            : JSON.parse(await cacheOf(DEFAULT_SEEDS)),
+        text: async () => "",
+      };
+    });
+  }
+
+  it("refuses every write on a locked vault", async () => {
+    const h = await makeController();
+    await expect(h.controller.createItem({ ...draft, password: "p" })).rejects.toBeInstanceOf(
+      LockedError,
+    );
+    await expect(h.controller.updateItem("c1", draft)).rejects.toBeInstanceOf(LockedError);
+    await expect(h.controller.deleteItem("c1")).rejects.toBeInstanceOf(LockedError);
+    expect(() => h.controller.detailFor("c1")).toThrow(LockedError);
+  });
+
+  it("creates an item and then syncs, so the cache stays the server's own answer", async () => {
+    const h = await writable();
+    const calls: { url: string; method?: string }[] = [];
+    vi.stubGlobal("fetch", recordingServer(calls));
+
+    await h.controller.createItem({
+      name: "New",
+      username: "u",
+      uri: "https://e.test",
+      password: "p",
+    });
+
+    const write = calls.find((c) => c.url.endsWith("/api/ciphers"));
+    expect(write?.method).toBe("POST");
+    expect(calls[calls.length - 1]!.url).toContain("/api/sync");
+  }, 40000);
+
+  it("leaves the cache untouched when the write fails", async () => {
+    const h = await writable();
+    const before = h.stored()?.cipherCache;
+    vi.stubGlobal("fetch", recordingServer([], 500));
+
+    await expect(
+      h.controller.createItem({ name: "New", username: "u", uri: "https://e.test", password: "p" }),
+    ).rejects.toThrow();
+
+    expect(h.stored()?.cipherCache).toBe(before);
+  }, 40000);
+
+  it("sends the changed entry to the update route, then syncs", async () => {
+    const h = await writable();
+    const calls: { url: string; method?: string }[] = [];
+    vi.stubGlobal("fetch", recordingServer(calls));
+
+    await h.controller.updateItem("c1", draft);
+
+    const write = calls.find((c) => c.url.includes("/api/ciphers/c1"));
+    expect(write?.method).toBe("PUT");
+    expect(calls[calls.length - 1]!.url).toContain("/api/sync");
+  }, 40000);
+
+  it("refuses to change or delete an organization item", async () => {
+    // Refused here and not only in the interface: the popup is not a
+    // security boundary, and writing one needs an endpoint and a collection
+    // this client never asks for.
+    const h = await writable();
+    await expect(h.controller.updateItem("org1", draft)).rejects.toThrow(/organization/i);
+    await expect(h.controller.deleteItem("org1")).rejects.toThrow(/organization/i);
+  }, 40000);
+
+  it("marks an organization item as not editable in its detail view", async () => {
+    const h = await writable();
+    expect(h.controller.detailFor("org1").editable).toBe(false);
+    expect(h.controller.detailFor("c1").editable).toBe(true);
+  }, 40000);
+
+  it("hands the editor no password, only whether there is one", async () => {
+    const h = await writable();
+    const detail = h.controller.detailFor("c1");
+    expect(detail.hasPassword).toBe(true);
+    expect(Object.keys(detail)).not.toContain("password");
+    // DEFAULT_SEEDS' password. If it ever shows up here, the whitelist leaked.
+    expect(JSON.stringify(detail)).not.toContain("hunter2");
+  }, 40000);
+
+  it("reports the first URL and how many the form is not showing", async () => {
+    const h = await writable();
+    const detail = h.controller.detailFor("c1");
+    expect(detail.uri).toBe("https://github.com");
+    expect(detail.otherUriCount).toBe(0);
+  }, 40000);
+
+  it("refuses to write an entry that is not in the vault", async () => {
+    const h = await writable();
+    await expect(h.controller.updateItem("nope", draft)).rejects.toThrow(/not found/i);
+  }, 40000);
+
+  it("sends the trash route for a delete", async () => {
+    const h = await writable();
+    const calls: { url: string; method?: string }[] = [];
+    vi.stubGlobal("fetch", recordingServer(calls));
+
+    await h.controller.deleteItem("c1");
+
+    const write = calls.find((c) => c.url.includes("/api/ciphers/c1/delete"));
+    expect(write?.method).toBe("PUT");
+  }, 40000);
 });

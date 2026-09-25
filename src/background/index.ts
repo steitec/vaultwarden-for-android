@@ -130,6 +130,14 @@ async function dispatch(
     }
     case "fill":
       return controller.fill(msg.tabId, msg.itemId);
+    case "itemDetail":
+      return Promise.resolve(controller.detailFor(msg.itemId));
+    case "createItem":
+      return controller.createItem(msg.draft);
+    case "updateItem":
+      return controller.updateItem(msg.itemId, msg.draft);
+    case "deleteItem":
+      return controller.deleteItem(msg.itemId);
     case "handOff": {
       // Two badge taps cannot finish on the page: a locked vault, and several
       // matches. Both land here so there is one mechanism rather than two.

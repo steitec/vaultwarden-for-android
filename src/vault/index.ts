@@ -11,6 +11,15 @@ export type VaultItem = {
   totp: string | null;
   uris: CipherUri[];
   favorite: boolean;
+  /**
+   * The organization that owns this item, or null for the personal vault.
+   *
+   * Read by the write path, which refuses an organization item: changing one
+   * needs a different endpoint and a collection the user has never been asked
+   * for. Carried on the item rather than re-derived from the cache, so the
+   * refusal cannot disagree with what was decrypted.
+   */
+  organizationId: string | null;
   undecryptable: boolean;
 };
 
@@ -65,6 +74,7 @@ async function decryptCipher(raw: RawCipher, parentKey: SymKey): Promise<VaultIt
     totp: await maybe(raw.login?.totp ?? null, key),
     uris,
     favorite: raw.favorite,
+    organizationId: raw.organizationId,
     undecryptable: false,
   };
 }
@@ -78,6 +88,13 @@ export async function decryptVault(
 
   for (const raw of payload.ciphers) {
     if (raw.type !== 1) continue; // logins only in v1
+
+    // An item in the trash is not part of the vault. Without this it is
+    // listed and offered for filling — which is what this add-on did until
+    // 2026-09, because nothing here ever looked at the field. `!= null`
+    // covers both spellings the server uses: an absent key and an explicit
+    // null both mean "not trashed".
+    if (raw.deletedDate != null) continue;
 
     const parentKey =
       raw.organizationId === null ? userKey : orgKeys.get(raw.organizationId);
@@ -108,6 +125,7 @@ function undecryptablePlaceholder(raw: RawCipher): VaultItem {
     totp: null,
     uris: [],
     favorite: raw.favorite,
+    organizationId: raw.organizationId,
     undecryptable: true,
   };
 }

@@ -15,11 +15,20 @@ import { wrapKeyWithPin } from "../session/pin";
 import { sync, UnauthorizedError } from "../api/sync";
 import { refreshToken, TwoFactorRequiredError } from "../api/identity";
 import { encryptToString, decryptToString, parseEncString } from "../crypto/encstring";
-import { unwrapOrgKeyMap } from "../crypto/keys";
+import { unwrapCipherKey, unwrapOrgKeyMap } from "../crypto/keys";
+import { encryptNewCipher, encryptUpdatedCipher, type ItemDraft } from "../vault/encrypt";
+import { createCipher, updateCipher, deleteCipher } from "../api/ciphers";
 import { utf8, zero } from "../crypto/bytes";
 import type { SymKey } from "../crypto/encstring";
 import { isRedeemable, type PendingFill } from "./pending";
-import type { ItemSummary, PageMatches, SetupResult, Status, TotpCode } from "./messages";
+import type {
+  ItemDraftView,
+  ItemSummary,
+  PageMatches,
+  SetupResult,
+  Status,
+  TotpCode,
+} from "./messages";
 
 export class LockedError extends Error {
   constructor() {
@@ -66,6 +75,7 @@ function summarize(i: VaultItem): ItemSummary {
     username: i.username,
     hasTotp: i.totp !== null,
     undecryptable: i.undecryptable,
+    editable: i.organizationId === null && !i.undecryptable,
   };
 }
 
@@ -364,21 +374,36 @@ export class Controller {
    * set.
    */
   async syncNow(): Promise<void> {
-    await this.syncAttempt(true);
+    await this.syncAttempt();
   }
 
-  private async syncAttempt(mayRetry: boolean): Promise<void> {
-    // Like matchesFor, this method tests session.state itself instead of
-    // going through require(), so it must settle the deadline itself too —
-    // otherwise a session that expired while nothing else touched it reads
-    // as "unlocked" here and this mints a fresh refresh token and reaches
-    // the network on an expired vault. Placed first so the retry re-entry
-    // below (mayRetry: false) is covered by the same call.
+  /**
+   * Runs one authenticated call against the configured server.
+   *
+   * The single place that knows how this client gets an access token: from the
+   * session if it has one, otherwise by unwrapping the refresh token under the
+   * user key. It also owns the one retry this client performs — on a 401, and
+   * on nothing else.
+   *
+   * That restriction is load-bearing now that writes come through here. A POST
+   * that reached the server and whose response was lost creates a DUPLICATE
+   * item when retried; a 401 is the one status that proves the request was
+   * never applied. The retry is a single re-invocation rather than recursion,
+   * so a server that rejects even a fresh token cannot loop.
+   *
+   * `lockIfExpired` first, like `require()` and `matchesFor`: this reads
+   * session state directly, and without it a session that expired while
+   * nothing else touched it would read as unlocked here and mint a fresh
+   * refresh token on an expired vault (F-4).
+   */
+  private async withAccessToken<T>(
+    fn: (accessToken: string, settings: StoredState) => Promise<T>,
+  ): Promise<T> {
     this.session.lockIfExpired();
 
-    // One read: `settings` returns a fresh clone per access. Writes go
-    // through session.update() — assigning to this clone would persist
-    // nothing and the vault would silently serve a stale cache forever.
+    // One read: `settings` returns a fresh clone per access, so two reads are
+    // two allocations and are not identical. Writes go through
+    // session.update() — assigning to this clone would persist nothing.
     const settings = this.session.settings;
     const userKey = this.session.userKey;
     if (this.session.state !== "unlocked" || settings === null || userKey === null) {
@@ -386,49 +411,51 @@ export class Controller {
     }
 
     // Held in a local across the awaits below rather than re-read from the
-    // session. The idle-lock timer can fire between any two awaits and
-    // null it out mid-flight; re-reading would then hand `null` straight
-    // into the Authorization header.
-    let accessToken = this.session.accessToken;
-    if (accessToken === null) {
-      if (settings.wrappedRefreshToken == null) {
-        throw new Error("Sign in with your master password to sync.");
-      }
-      // Unwrapping requires the user key, which only exists while unlocked.
-      const rt = await decryptToString(parseEncString(settings.wrappedRefreshToken), userKey);
-      const t = await refreshToken(settings.serverUrl, rt);
-      accessToken = t.access_token;
-      this.session.accessToken = accessToken;
-      // Persist whatever the server handed back, immediately, before the
-      // sync below can fail.
-      //
-      // The original rationale here — "Vaultwarden invalidates the old
-      // one" — was WRONG, and the integration suite disproved it: 1.37.1
-      // returns the byte-identical refresh token and the old one keeps
-      // working (see `does NOT rotate the refresh token` in
-      // tests/integration/live.test.ts). So on 1.37.1 this write is a
-      // no-op. It stays because a server that DOES rotate is the case that
-      // costs the user their session: dropping a rotated token here signs
-      // them out at the next unlock, and upstream Bitwarden rotates.
-      await this.session.update({
-        wrappedRefreshToken: await encryptToString(utf8(t.refresh_token), userKey),
-      });
-    }
-
-    let payload;
+    // session: the idle lock can fire between any two awaits and null it out
+    // mid-flight, which would hand `null` straight into the Authorization
+    // header.
+    const token = this.session.accessToken ?? (await this.mintAccessToken(settings, userKey));
     try {
-      payload = await sync(settings.serverUrl, accessToken);
+      return await fn(token, settings);
     } catch (e) {
-      if (e instanceof UnauthorizedError && mayRetry) {
-        // The access token expired mid-session; refresh once and retry
-        // rather than surfacing a spurious sign-in prompt. The guard
-        // matters: without it, a server that rejects even a fresh token
-        // recurses forever.
-        this.session.accessToken = null;
-        return this.syncAttempt(false);
-      }
-      throw e;
+      if (!(e instanceof UnauthorizedError)) throw e;
+      // The access token expired mid-session. Refresh once and repeat, rather
+      // than surfacing a spurious sign-in prompt.
+      this.session.accessToken = null;
+      return await fn(await this.mintAccessToken(settings, userKey), settings);
     }
+  }
+
+  /**
+   * Trades the wrapped refresh token for an access token, and persists
+   * whatever came back before the caller's request can fail.
+   *
+   * The original rationale for that write — "Vaultwarden invalidates the old
+   * one" — was WRONG, and the integration suite disproved it: 1.37.1 returns
+   * the byte-identical refresh token and the old one keeps working (see
+   * `does NOT rotate the refresh token` in tests/integration/live.test.ts). So
+   * on 1.37.1 this write is a no-op. It stays because a server that DOES
+   * rotate is the case that costs the user their session: dropping a rotated
+   * token here signs them out at the next unlock, and upstream Bitwarden
+   * rotates.
+   *
+   * Unwrapping requires the user key, which only exists while unlocked.
+   */
+  private async mintAccessToken(settings: StoredState, userKey: SymKey): Promise<string> {
+    if (settings.wrappedRefreshToken == null) {
+      throw new Error("Sign in with your master password to sync.");
+    }
+    const rt = await decryptToString(parseEncString(settings.wrappedRefreshToken), userKey);
+    const t = await refreshToken(settings.serverUrl, rt);
+    this.session.accessToken = t.access_token;
+    await this.session.update({
+      wrappedRefreshToken: await encryptToString(utf8(t.refresh_token), userKey),
+    });
+    return t.access_token;
+  }
+
+  private async syncAttempt(): Promise<void> {
+    const payload = await this.withAccessToken((token, settings) => sync(settings.serverUrl, token));
 
     await this.session.update({
       cipherCache: JSON.stringify(payload),
@@ -581,6 +608,123 @@ export class Controller {
     const item = this.require("user").find((i) => i.id === itemId);
     if (item?.totp == null) throw new Error("Item has no TOTP secret");
     return generateTotp(item.totp, Date.now());
+  }
+
+  /**
+   * What the editor is allowed to know about an entry.
+   *
+   * No password — only `hasPassword`, one bit, which is what the overwrite
+   * confirmation is built from. A whitelist for the same reason `summarize`
+   * is one: spreading a VaultItem and deleting fields would silently start
+   * leaking whatever a future field adds.
+   */
+  detailFor(itemId: string): ItemDraftView {
+    const item = this.require("user").find((i) => i.id === itemId);
+    if (item === undefined) throw new Error("Item not found");
+    return {
+      id: item.id,
+      name: item.name,
+      username: item.username,
+      uri: item.uris[0]?.uri ?? null,
+      otherUriCount: Math.max(0, item.uris.length - 1),
+      hasPassword: item.password !== null,
+      editable: item.organizationId === null && !item.undecryptable,
+    };
+  }
+
+  async createItem(draft: ItemDraft): Promise<void> {
+    this.require("user");
+    const userKey = this.session.userKey;
+    if (userKey === null) throw new LockedError();
+
+    const body = await encryptNewCipher(draft, userKey);
+    await this.withAccessToken((token, settings) => createCipher(settings.serverUrl, token, body));
+    // A full sync rather than splicing the response into the cache: the cache
+    // keeps one way of coming into existence, and one validator.
+    await this.syncAttempt();
+  }
+
+  async updateItem(itemId: string, draft: ItemDraft): Promise<void> {
+    const item = this.editableItem(itemId);
+    const userKey = this.session.userKey;
+    if (userKey === null) throw new LockedError();
+
+    const raw = this.rawCipherFor(itemId);
+    // The item's own key when it has one, the user key otherwise. Encrypting
+    // an item that has its own key under the user key instead would leave it
+    // permanently undecryptable.
+    const cipherKey = await unwrapCipherKey(typeof raw.key === "string" ? raw.key : null, userKey);
+    const body = await encryptUpdatedCipher(
+      raw,
+      draft,
+      { uri: item.uris[0]?.uri ?? null },
+      cipherKey,
+      new Date().toISOString(),
+    );
+
+    await this.withAccessToken((token, settings) =>
+      updateCipher(settings.serverUrl, token, itemId, body),
+    );
+    await this.syncAttempt();
+  }
+
+  /** Moves an item to the trash. The web vault can restore it. */
+  async deleteItem(itemId: string): Promise<void> {
+    this.editableItem(itemId);
+    await this.withAccessToken((token, settings) =>
+      deleteCipher(settings.serverUrl, token, itemId),
+    );
+    await this.syncAttempt();
+  }
+
+  /**
+   * The item a write is about, or a refusal.
+   *
+   * An organization item is refused here and not only in the interface: the
+   * popup is not a security boundary, and writing one needs an endpoint and a
+   * collection this client never asks for.
+   */
+  private editableItem(itemId: string): VaultItem {
+    const item = this.require("user").find((i) => i.id === itemId);
+    if (item === undefined) throw new Error("Item not found");
+    if (item.organizationId !== null) {
+      throw new Error("This entry belongs to an organization. Change it in the web vault.");
+    }
+    if (item.undecryptable) {
+      throw new Error("This entry could not be decrypted, so it cannot be changed.");
+    }
+    return item;
+  }
+
+  /**
+   * The raw, still-encrypted cipher as the server last sent it.
+   *
+   * The update body is built from this rather than from a VaultItem, so every
+   * field this client does not model survives a full-replace PUT. Re-parsed
+   * from `cipherCache` rather than held in memory: the cache is the only copy
+   * guaranteed to be what the server actually said.
+   */
+  private rawCipherFor(itemId: string): Record<string, unknown> {
+    const unavailable = new Error("This entry cannot be changed until the next sync.");
+    const cache = this.session.settings?.cipherCache;
+    if (cache == null) throw unavailable;
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(cache);
+    } catch {
+      throw unavailable;
+    }
+    if (typeof parsed !== "object" || parsed === null) throw unavailable;
+    const ciphers: unknown = (parsed as Record<string, unknown>).ciphers;
+    if (!Array.isArray(ciphers)) throw unavailable;
+
+    for (const c of ciphers) {
+      if (typeof c === "object" && c !== null && (c as Record<string, unknown>).id === itemId) {
+        return { ...(c as Record<string, unknown>) };
+      }
+    }
+    throw new Error("This entry is no longer in the vault. Sync and try again.");
   }
 
   async fill(tabId: number, itemId: string): Promise<void> {
