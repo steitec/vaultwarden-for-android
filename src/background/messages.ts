@@ -147,7 +147,11 @@ export type Request =
       twoFactor?: { token: string; provider: number };
     }
   | { kind: "sync" }
-  | { kind: "setUnlockMode"; mode: UnlockMode; pin?: string };
+  | { kind: "setUnlockMode"; mode: UnlockMode; pin?: string }
+  | { kind: "itemDetail"; itemId: string }
+  | { kind: "createItem"; draft: ItemDraftMessage }
+  | { kind: "updateItem"; itemId: string; draft: ItemDraftMessage }
+  | { kind: "deleteItem"; itemId: string };
 
 /** `void` covers the kinds that answer with an acknowledgement only. */
 export type Response =
@@ -172,6 +176,30 @@ function isTwoFactor(v: unknown): v is { token: string; provider: number } {
   if (typeof v !== "object" || v === null) return false;
   if (!("token" in v) || !("provider" in v)) return false;
   return isString(v.token) && typeof v.provider === "number" && Number.isFinite(v.provider);
+}
+
+/**
+ * Every field checked, not merely present.
+ *
+ * These strings go straight into encryption and into a URL comparison: a
+ * non-string `name` would reach `String.prototype.trim`, a non-string
+ * `password` would reach `TextEncoder.encode`.
+ *
+ * `password` is `string | null`, and `undefined` is NOT accepted. "Absent"
+ * and "leave the stored password alone" have to be the same explicit value on
+ * the wire — otherwise a field dropped in transit would quietly mean "keep
+ * the old password" on a create, which is a request that cannot be satisfied
+ * at all.
+ */
+function isItemDraft(v: unknown): v is ItemDraftMessage {
+  if (typeof v !== "object" || v === null) return false;
+  if (!("name" in v) || !("username" in v) || !("uri" in v) || !("password" in v)) return false;
+  return (
+    isString(v.name) &&
+    isString(v.username) &&
+    isString(v.uri) &&
+    (v.password === null || isString(v.password))
+  );
 }
 
 /**
@@ -224,6 +252,13 @@ export function isRequest(v: unknown): v is Request {
       );
     case "unlock":
       return "pin" in v && isString(v.pin);
+    case "itemDetail":
+    case "deleteItem":
+      return "itemId" in v && isString(v.itemId);
+    case "createItem":
+      return "draft" in v && isItemDraft(v.draft);
+    case "updateItem":
+      return "itemId" in v && isString(v.itemId) && "draft" in v && isItemDraft(v.draft);
     case "list":
       return "query" in v && isString(v.query);
     case "fill":
