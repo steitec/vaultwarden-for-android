@@ -1,7 +1,9 @@
 # Saving credentials — creating, editing and deleting items — Design
 
 Date: 2026-09-25
-Status: Designed. Not implemented.
+Status: Implemented on branch `feat/item-editing`, 2026-09-25. Unit and
+live-container suites green; the three device checks in `docs/BACKLOG.md` § 3
+are still open.
 
 Closes two of the entries in `docs/BACKLOG.md` § 4 ("item creation and
 editing"). It deliberately does **not** close the third one next to them,
