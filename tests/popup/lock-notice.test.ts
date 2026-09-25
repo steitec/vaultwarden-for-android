@@ -11,7 +11,10 @@ import type { Status } from "../../src/background/messages";
 const SKELETON = `
   <header id="status" class="status"></header>
   <nav id="settings" class="settings" hidden></nav>
-  <input id="search" class="search" type="search" />
+  <div class="toolbar">
+    <input id="search" class="search" type="search" />
+    <button id="new-item" class="new-item" type="button" hidden>+</button>
+  </div>
   <p id="error" class="banner" role="alert" hidden></p>
   <main id="root"></main>
 `;
@@ -32,7 +35,14 @@ function kindOf(req: unknown): string {
 let portListeners: ((msg: unknown) => void)[] = [];
 let connected = false;
 
-const ITEM = { id: "c1", name: "GitHub", username: "octo", hasTotp: false, undecryptable: false };
+const ITEM = {
+  id: "c1",
+  name: "GitHub",
+  username: "octo",
+  hasTotp: false,
+  undecryptable: false,
+  editable: true,
+};
 
 /** Locked once the idle timer has run; unlocked before that. */
 let locked = false;
@@ -57,6 +67,18 @@ function respond(req: unknown): unknown {
   }
   if (kind === "matches") {
     return locked ? { state: "locked" } : { state: "unlocked", items: [ITEM] };
+  }
+  if (kind === "itemDetail") {
+    if (locked) throw new Error("Vault is locked");
+    return {
+      id: ITEM.id,
+      name: ITEM.name,
+      username: ITEM.username,
+      uri: "https://github.com",
+      otherUriCount: 0,
+      hasPassword: true,
+      editable: true,
+    };
   }
   throw new Error(`unexpected kind ${kind}`);
 }
@@ -123,5 +145,23 @@ describe("a vault that locks while the popup is open", () => {
     await vi.waitFor(() => {
       expect(root.querySelector("#unlock-pin")).not.toBeNull();
     });
+  });
+
+  it("tears the editor down, blanking what was typed, when the vault locks", async () => {
+    // The editor is the one screen that holds a plaintext password in the
+    // DOM. A lock has to take it away, and take the typed value with it --
+    // replaceChildren alone would leave it in a detached input for the
+    // garbage collector to deal with whenever it felt like it.
+    await main();
+    requireEl("new-item").click();
+    await vi.waitFor(() => expect(document.getElementById("editor-password")).not.toBeNull());
+    const password = document.getElementById("editor-password") as HTMLInputElement;
+    password.value = "typed but never saved";
+
+    locked = true;
+    notifyLocked();
+
+    await vi.waitFor(() => expect(document.getElementById("editor-password")).toBeNull());
+    expect(password.value).toBe("");
   });
 });

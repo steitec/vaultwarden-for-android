@@ -605,6 +605,36 @@ gesture.
 - [ ] A failed sync (server unreachable) shows an error banner and leaves the
       existing list intact rather than blanking it.
 
+### Creating, changing and deleting entries — added 2026-09-25
+
+- [ ] The `+` in the toolbar opens an empty form with the current page's
+      address already in the Website field.
+- [ ] "Generate" fills the password field with something long and visible.
+- [ ] Saving returns to the list, and the new entry is in it.
+- [ ] The new entry fills on a real login page.
+- [ ] Opening an existing entry with "Edit" shows its name, address and
+      username, and an **empty** password field labelled "leave empty to keep
+      the current one".
+- [ ] **Add notes to an entry in the web vault, change that entry's name here,
+      then look at it again in the web vault: the notes are still there.**
+
+  This is the one that matters. `PUT /api/ciphers/{id}` replaces the whole
+  item, so an update body built from what the panel can see would delete
+  notes, custom fields, the TOTP secret, the folder and the favourite flag on
+  every save — silently, and weeks before anyone noticed. The integration
+  suite covers it against the pinned container; this check adds a real
+  account, a real network and a real web vault.
+
+- [ ] Typing a new password and saving asks "The existing password will be
+      replaced" first, and "Back" returns to the form with what was typed.
+- [ ] After replacing a password, the web vault shows the old one under the
+      entry's password history.
+- [ ] "Delete" asks first, naming the entry, and afterwards the entry is in the
+      web vault's **trash** rather than gone.
+- [ ] An entry belonging to an organization offers no "Edit".
+- [ ] With the server unreachable, saving fails with a readable message and
+      the form keeps everything that was typed.
+
 ### Sign out
 
 - [ ] "Sign out" asks for confirmation first.
@@ -625,7 +655,6 @@ gesture.
 
 Recorded here so they are not silently lost:
 
-- item creation and editing
 - save-password prompts
 - Sends and attachments
 - card and identity item types

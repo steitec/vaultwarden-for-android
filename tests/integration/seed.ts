@@ -200,6 +200,10 @@ export type SeedCipherOpts = {
   totp?: string | null;
   uris?: string[] | null;
   withItemKey?: boolean;
+  /** Plaintext notes, so the update path can be shown not to destroy them. */
+  notes?: string;
+  /** One custom field, for the same reason. */
+  customField?: { name: string; value: string };
   folderId?: string | null;
   /** Set to create the cipher inside an organization instead of the vault. */
   organization?: { id: string; orgKey: SymKey; collectionIds: string[] };
@@ -232,7 +236,7 @@ export async function seedCipher(
   accessToken: string,
   userKey: SymKey,
   opts: SeedCipherOpts,
-): Promise<void> {
+): Promise<string> {
   // An organization cipher is encrypted under the ORGANIZATION key, not the
   // user key — that is the whole point of the org path in decryptVault.
   const parentKey = opts.organization?.orgKey ?? userKey;
@@ -253,6 +257,17 @@ export async function seedCipher(
     folderId: opts.folderId ?? null,
     organizationId: opts.organization?.id ?? null,
   };
+
+  if (opts.notes !== undefined) body.notes = await encrypt(utf8(opts.notes), key);
+  if (opts.customField !== undefined) {
+    body.fields = [
+      {
+        type: 0,
+        name: await encrypt(utf8(opts.customField.name), key),
+        value: await encrypt(utf8(opts.customField.value), key),
+      },
+    ];
+  }
 
   if (type === 1) {
     const login: Record<string, unknown> = {};
@@ -290,6 +305,19 @@ export async function seedCipher(
           body: JSON.stringify({ cipher: body, collectionIds: org.collectionIds }),
         });
   if (!res.ok) throw new Error(`Cipher creation failed: ${res.status} ${await res.text()}`);
+
+  // The server id, so a test can address the cipher it just made. Checked
+  // rather than cast: this is a network response like any other.
+  const created: unknown = await res.json();
+  if (
+    typeof created !== "object" ||
+    created === null ||
+    !("id" in created) ||
+    typeof created.id !== "string"
+  ) {
+    throw new Error("Cipher creation returned no id");
+  }
+  return created.id;
 }
 
 /** The plaintext of every seeded login, so tests can assert on decryption. */
