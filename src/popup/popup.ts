@@ -67,6 +67,7 @@ const REQUEST_TIMEOUT_MS: Record<Request["kind"], number> = {
   totp: 4000,
   fill: 4000,
   fillFromPage: 4000,
+  itemDetail: 4000,
   handOff: 4000,
   lock: 4000,
   signOut: 4000,
@@ -94,6 +95,13 @@ const REQUEST_TIMEOUT_MS: Record<Request["kind"], number> = {
   // budgets for. Turning it off is a single storage write, and shares this
   // budget rather than earning a second entry.
   setUnlockMode: 15000,
+
+  // Encrypt, one write round trip, then a full sync and a full re-decrypt of
+  // the vault. That is everything `sync` budgets for, plus the write, on
+  // mobile data.
+  createItem: 30000,
+  updateItem: 30000,
+  deleteItem: 30000,
 };
 
 class BackgroundUnavailableError extends Error {
