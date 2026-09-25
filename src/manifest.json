@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Vaultwarden for Android",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Unlock and autofill a self-hosted Vaultwarden vault on Firefox for Android.",
   "browser_specific_settings": {
     "gecko": {
