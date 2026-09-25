@@ -20,6 +20,8 @@ import { sync, UnauthorizedError, SyncFailedError } from "../../src/api/sync";
 import { isSyncResponse, isRawCipher, isPreloginResponse } from "../../src/api/types";
 import { performLogin } from "../../src/background/login";
 import { decryptVault } from "../../src/vault/index";
+import { encryptNewCipher, encryptUpdatedCipher } from "../../src/vault/encrypt";
+import { createCipher, updateCipher, deleteCipher } from "../../src/api/ciphers";
 import { generateTotp } from "../../src/totp";
 import type { SymKey } from "../../src/crypto/encstring";
 import { toBase64, concat, utf8 } from "../../src/crypto/bytes";
@@ -297,8 +299,16 @@ describe("live Vaultwarden", () => {
    * whole vault against a committed fixture.
    */
   describe("write routes", () => {
+    // ONE account for every test below. `seedAccount` performs a password
+    // grant, and vaultwarden rate-limits /identity/connect/token — a fresh
+    // account per test exhausts the burst and the failures look like
+    // malformed token responses.
+    let account: Awaited<ReturnType<typeof seedAccount>>;
+    beforeAll(async () => {
+      account = await seedAccount();
+    }, 60000);
+
     it("updates a cipher with PUT /api/ciphers/{id}", async () => {
-      const account = await seedAccount();
       const id = await seedCipher(account.accessToken, account.userKey, {
         name: "Route Probe",
         username: "probe-user",
@@ -331,7 +341,6 @@ describe("live Vaultwarden", () => {
     }, 60000);
 
     it("moves a cipher to the trash with PUT /api/ciphers/{id}/delete, and sync then carries deletedDate", async () => {
-      const account = await seedAccount();
       const id = await seedCipher(account.accessToken, account.userKey, {
         name: "Trash Probe",
         password: "probe-pass",
@@ -360,7 +369,6 @@ describe("live Vaultwarden", () => {
     }, 60000);
 
     it("records what a stale lastKnownRevisionDate does here", async () => {
-      const account = await seedAccount();
       const id = await seedCipher(account.accessToken, account.userKey, {
         name: "Revision Probe",
         password: "probe-pass",
@@ -384,6 +392,151 @@ describe("live Vaultwarden", () => {
       // eslint-disable-next-line no-console
       console.log(`[probe] stale lastKnownRevisionDate -> ${res.status}`);
       expect([200, 400]).toContain(res.status);
+    }, 60000);
+  });
+  /**
+   * The feature itself, through the production modules, against a real
+   * server. The unit suite proves the shapes; this proves the feature.
+   */
+  describe("the write path", () => {
+    // One account, for the reason given in "write routes" above.
+    let account: Awaited<ReturnType<typeof seedAccount>>;
+    beforeAll(async () => {
+      account = await seedAccount();
+    }, 60000);
+
+    it("creates an item that syncs back and decrypts to what was typed", async () => {
+      const body = await encryptNewCipher(
+        {
+          name: "Created Live",
+          username: "live-user",
+          uri: "https://live.example",
+          password: "live-pass",
+        },
+        account.userKey,
+      );
+      await createCipher(SERVER, account.accessToken, body);
+
+      const payload = await sync(SERVER, account.accessToken);
+      const items = await decryptVault(payload, account.userKey, new Map());
+      const created = items.find((i) => i.name === "Created Live");
+
+      expect(created).toBeDefined();
+      expect(created!.username).toBe("live-user");
+      expect(created!.password).toBe("live-pass");
+      expect(created!.uris.map((u) => u.uri)).toEqual(["https://live.example"]);
+    }, 60000);
+
+    it("changes a name without destroying notes, custom fields or the TOTP secret", async () => {
+      // The failure this whole design exists to prevent, and the only place
+      // it is visible: a real server, with fields this client never models.
+      const id = await seedCipher(account.accessToken, account.userKey, {
+        name: "Rich Item",
+        username: "rich-user",
+        password: "rich-pass",
+        totp: "JBSWY3DPEHPK3PXP",
+        uris: ["https://rich.example"],
+        notes: "recovery codes are in the safe",
+        customField: { name: "Account number", value: "12345" },
+      });
+
+      const before = await sync(SERVER, account.accessToken);
+      // The typed RawCipher describes only the fields this client reads; the
+      // VALUE carries everything the server sent, which is exactly what is
+      // being preserved here.
+      const raw = before.ciphers.find((c) => c.id === id) as unknown as Record<string, unknown>;
+
+      const body = await encryptUpdatedCipher(
+        { ...raw },
+        {
+          name: "Rich Item renamed",
+          username: "rich-user",
+          uri: "https://rich.example",
+          password: null,
+        },
+        { uri: "https://rich.example" },
+        account.userKey,
+        new Date().toISOString(),
+      );
+      await updateCipher(SERVER, account.accessToken, id, body);
+
+      const after = await sync(SERVER, account.accessToken);
+      const updated = after.ciphers.find((c) => c.id === id) as unknown as Record<string, unknown>;
+
+      expect(updated.notes).toBe(raw.notes);
+      expect(updated.fields).toEqual(raw.fields);
+      expect((updated.login as Record<string, unknown>).totp).toBe(
+        (raw.login as Record<string, unknown>).totp,
+      );
+      // Untouched, not merely present: the same ciphertext.
+      expect((updated.login as Record<string, unknown>).password).toBe(
+        (raw.login as Record<string, unknown>).password,
+      );
+
+      const [item] = await decryptVault(
+        { ...after, ciphers: after.ciphers.filter((c) => c.id === id) },
+        account.userKey,
+        new Map(),
+      );
+      expect(item!.name).toBe("Rich Item renamed");
+      expect(item!.password).toBe("rich-pass");
+    }, 60000);
+
+    it("is accepted when lastKnownRevisionDate is current, so the guard does not misfire", async () => {
+      const id = await seedCipher(account.accessToken, account.userKey, {
+        name: "Fresh Revision",
+        password: "fresh-pass",
+      });
+      const before = await sync(SERVER, account.accessToken);
+      const raw = before.ciphers.find((c) => c.id === id) as unknown as Record<string, unknown>;
+
+      const body = await encryptUpdatedCipher(
+        { ...raw },
+        { name: "Fresh Revision renamed", username: "", uri: "", password: null },
+        { uri: null },
+        account.userKey,
+        new Date().toISOString(),
+      );
+
+      await expect(updateCipher(SERVER, account.accessToken, id, body)).resolves.toBeUndefined();
+    }, 60000);
+
+    it("files the old password into the history when it is replaced", async () => {
+      const id = await seedCipher(account.accessToken, account.userKey, {
+        name: "History Item",
+        password: "first-pass",
+      });
+      const before = await sync(SERVER, account.accessToken);
+      const raw = before.ciphers.find((c) => c.id === id) as unknown as Record<string, unknown>;
+
+      const body = await encryptUpdatedCipher(
+        { ...raw },
+        { name: "History Item", username: "", uri: "", password: "second-pass" },
+        { uri: null },
+        account.userKey,
+        new Date().toISOString(),
+      );
+      await updateCipher(SERVER, account.accessToken, id, body);
+
+      const after = await sync(SERVER, account.accessToken);
+      const updated = after.ciphers.find((c) => c.id === id) as unknown as Record<string, unknown>;
+      expect(Array.isArray(updated.passwordHistory)).toBe(true);
+      expect((updated.passwordHistory as unknown[]).length).toBeGreaterThanOrEqual(1);
+    }, 60000);
+
+    it("removes a trashed item from the decrypted vault", async () => {
+      const id = await seedCipher(account.accessToken, account.userKey, {
+        name: "Doomed Item",
+        password: "doomed-pass",
+      });
+
+      await deleteCipher(SERVER, account.accessToken, id);
+
+      const payload = await sync(SERVER, account.accessToken);
+      const items = await decryptVault(payload, account.userKey, new Map());
+      expect(items.find((i) => i.name === "Doomed Item")).toBeUndefined();
+      // Still on the wire: this is the trash, not deletion.
+      expect(payload.ciphers.find((c) => c.id === id)).toBeDefined();
     }, 60000);
   });
 });
