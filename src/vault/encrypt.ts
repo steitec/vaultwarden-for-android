@@ -80,3 +80,88 @@ export async function encryptNewCipher(
     login,
   };
 }
+
+type RawLogin = Record<string, unknown>;
+type RawUri = { uri: unknown; match: unknown };
+
+function loginOf(raw: Record<string, unknown>): RawLogin {
+  const login = raw.login;
+  return typeof login === "object" && login !== null ? { ...(login as RawLogin) } : {};
+}
+
+function urisOf(login: RawLogin): RawUri[] {
+  return Array.isArray(login.uris) ? [...(login.uris as RawUri[])] : [];
+}
+
+/**
+ * The request body for `PUT /api/ciphers/{id}`, which REPLACES the cipher.
+ *
+ * Built from `raw` — the verbatim cached cipher — and not from a VaultItem.
+ * That is the point of the whole design: notes, custom fields, the TOTP
+ * secret, the folder, the favourite flag and any field a future server
+ * version adds are present here as opaque strings and are copied through
+ * untouched. Building this from the four fields the interface shows would
+ * delete every one of them on every save, silently, and the loss would
+ * surface weeks later when the backups had it too.
+ *
+ * `cipherKey` is what this item's fields are encrypted under — the user key,
+ * or the item's own key when it has one. The caller obtains it with
+ * `unwrapCipherKey(raw.key, userKey)`; `raw.key` itself is copied through
+ * unchanged, so an item with its own key stays readable.
+ *
+ * `previous.uri` is the DECRYPTED first URI, which the caller has and this
+ * module cannot obtain: ciphertext cannot be compared against what the user
+ * typed. When it is unchanged, the stored EncString is copied rather than
+ * re-encrypted.
+ *
+ * `lastKnownRevisionDate` is sent when the cache has one. Vaultwarden 1.37.1
+ * answers a stale value with 400 (confirmed by the probe in
+ * tests/integration/live.test.ts), so sending it turns a silent overwrite of
+ * somebody else's change into a refusal the user can act on. It is omitted
+ * rather than invented when the cached cipher carries no revision: an
+ * unguarded write is better than one guarded by a value we made up.
+ */
+export async function encryptUpdatedCipher(
+  raw: Record<string, unknown>,
+  draft: ItemDraft,
+  previous: { uri: string | null },
+  cipherKey: SymKey,
+  nowIso: string,
+): Promise<Record<string, unknown>> {
+  const name = draft.name.trim();
+  if (name === "") throw new DraftIncompleteError("An entry needs a name.");
+
+  const body: Record<string, unknown> = { ...raw };
+  const login = loginOf(raw);
+
+  body.name = await encryptToString(utf8(name), cipherKey);
+  if (typeof raw.revisionDate === "string") body.lastKnownRevisionDate = raw.revisionDate;
+
+  login.username =
+    draft.username === "" ? null : await encryptToString(utf8(draft.username), cipherKey);
+
+  // Copied, not re-encrypted. Re-encrypting the same plaintext would also be
+  // correct, but copying makes "I did not mean to change the password"
+  // impossible to get wrong, and lets a test assert it byte for byte.
+  if (draft.password !== null) {
+    login.password = await encryptToString(utf8(draft.password), cipherKey);
+  }
+
+  const uris = urisOf(login);
+  if (draft.uri !== (previous.uri ?? "")) {
+    const encrypted = draft.uri === "" ? null : await encryptToString(utf8(draft.uri), cipherKey);
+    if (encrypted === null) {
+      uris.shift();
+    } else if (uris.length === 0) {
+      uris.push({ uri: encrypted, match: null });
+    } else {
+      // The match type belongs to the URL slot, not to the URL text: a user
+      // correcting a typo has not asked for the matching rule to change.
+      uris[0] = { uri: encrypted, match: uris[0]!.match };
+    }
+  }
+  login.uris = uris;
+
+  body.login = login;
+  return body;
+}
