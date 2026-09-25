@@ -200,6 +200,10 @@ export type SeedCipherOpts = {
   totp?: string | null;
   uris?: string[] | null;
   withItemKey?: boolean;
+  /** Plaintext notes, so the update path can be shown not to destroy them. */
+  notes?: string;
+  /** One custom field, for the same reason. */
+  customField?: { name: string; value: string };
   folderId?: string | null;
   /** Set to create the cipher inside an organization instead of the vault. */
   organization?: { id: string; orgKey: SymKey; collectionIds: string[] };
@@ -253,6 +257,17 @@ export async function seedCipher(
     folderId: opts.folderId ?? null,
     organizationId: opts.organization?.id ?? null,
   };
+
+  if (opts.notes !== undefined) body.notes = await encrypt(utf8(opts.notes), key);
+  if (opts.customField !== undefined) {
+    body.fields = [
+      {
+        type: 0,
+        name: await encrypt(utf8(opts.customField.name), key),
+        value: await encrypt(utf8(opts.customField.value), key),
+      },
+    ];
+  }
 
   if (type === 1) {
     const login: Record<string, unknown> = {};
