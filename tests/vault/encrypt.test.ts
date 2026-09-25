@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   encryptNewCipher,
   encryptUpdatedCipher,
+  PASSWORD_HISTORY_LIMIT,
   DraftIncompleteError,
   type ItemDraft,
 } from "../../src/vault/encrypt";
@@ -308,6 +309,73 @@ describe("encryptUpdatedCipher", () => {
     delete raw.revisionDate;
     const body = await encryptUpdatedCipher(raw, unchanged, FIRST_URI, userKey, NOW);
     expect(body).not.toHaveProperty("lastKnownRevisionDate");
+  });
+
+  it("files the replaced password into passwordHistory, newest first", async () => {
+    const raw = await cached();
+    const body = await encryptUpdatedCipher(
+      raw,
+      { ...unchanged, password: "new one" },
+      FIRST_URI,
+      userKey,
+      NOW,
+    );
+    const history = body.passwordHistory as { password: string; lastUsedDate: string }[];
+    expect(history).toHaveLength(1);
+    // The old ciphertext verbatim: no decryption, no re-encryption.
+    expect(history[0]!.password).toBe(loginOf(raw).password);
+    expect(history[0]!.lastUsedDate).toBe(NOW);
+  });
+
+  it("keeps existing history behind the new entry", async () => {
+    const raw = {
+      ...(await cached()),
+      passwordHistory: [{ password: "2.older", lastUsedDate: "2026-01-01T00:00:00.000Z" }],
+    };
+    const body = await encryptUpdatedCipher(
+      raw,
+      { ...unchanged, password: "new one" },
+      FIRST_URI,
+      userKey,
+      NOW,
+    );
+    const history = body.passwordHistory as { password: string }[];
+    expect(history).toHaveLength(2);
+    expect(history[1]!.password).toBe("2.older");
+  });
+
+  it("caps the history, so it cannot grow without bound", async () => {
+    const older = Array.from({ length: 9 }, (_, i) => ({
+      password: `2.old${i}`,
+      lastUsedDate: NOW,
+    }));
+    const body = await encryptUpdatedCipher(
+      { ...(await cached()), passwordHistory: older },
+      { ...unchanged, password: "new one" },
+      FIRST_URI,
+      userKey,
+      NOW,
+    );
+    expect((body.passwordHistory as unknown[]).length).toBe(PASSWORD_HISTORY_LIMIT);
+  });
+
+  it("does not touch the history when the password was left alone", async () => {
+    const body = await encryptUpdatedCipher(await cached(), unchanged, FIRST_URI, userKey, NOW);
+    expect(body.passwordHistory).toBeUndefined();
+  });
+
+  it("writes no history entry when the item had no password to keep", async () => {
+    const raw = await cached();
+    const login = { ...loginOf(raw) };
+    delete login.password;
+    const body = await encryptUpdatedCipher(
+      { ...raw, login },
+      { ...unchanged, password: "first one" },
+      FIRST_URI,
+      userKey,
+      NOW,
+    );
+    expect(body.passwordHistory).toBeUndefined();
   });
 
   it("refuses an update with no name", async () => {
