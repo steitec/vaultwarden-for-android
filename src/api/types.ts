@@ -95,6 +95,14 @@ export type RawCipher = {
   name: string;
   favorite: boolean;
   key?: string | null;
+  /**
+   * Set when the item is in the trash. Optional AND nullable because both
+   * spellings occur: vaultwarden omits the key for an item that has never
+   * been trashed and sends null for one that was restored. `decryptVault`
+   * treats them alike — see its `!= null` test, which is deliberate rather
+   * than a slack `!==`.
+   */
+  deletedDate?: string | null;
   login?: {
     username?: string | null;
     password?: string | null;
@@ -238,6 +246,7 @@ export function isRawCipher(v: unknown): v is RawCipher {
     typeof v.name === "string" &&
     typeof v.favorite === "boolean" &&
     isOptionalString(v.key) &&
+    isOptionalString(v.deletedDate) &&
     isRawLogin(v.login)
   );
 }
