@@ -40,6 +40,9 @@ Requires Firefox 121 or newer. Tested against Vaultwarden 1.37.1.
 - Keeps the last sync as ciphertext, so a vault stays readable with no network.
 - Locks after 15 minutes idle by default, and the lock survives a phone that
   was asleep.
+- Creates, changes and trashes a login from the panel, with a password
+  generator. Writing needs the server — there is no offline queue, so what the
+  vault holds is always what the server acknowledged.
 
 ## What it does not do
 
@@ -60,9 +63,16 @@ tracker because finding them yourself is worse than being told.
   `TOTP` in the list, and that is all the interface does with them today; the
   code generator exists but nothing calls it yet.
 
-Not implemented at all, and not planned for this version: creating or editing
-items, save-password prompts, Sends, attachments, card and identity item types,
-passkeys, more than one account, and push sync.
+- **Editing is for your own vault only.** An entry that belongs to an
+  organization can be read and filled here, but changing or deleting it needs
+  the web vault: that takes a different endpoint and a collection this add-on
+  never asks you to choose.
+- **Deleting means the trash.** The web vault can restore it; this add-on
+  cannot delete permanently.
+
+Not implemented at all, and not planned for this version: save-password
+prompts, Sends, attachments, card and identity item types, passkeys, more than
+one account, and push sync.
 
 ## Security
 
