@@ -38,6 +38,15 @@ export class DraftIncompleteError extends Error {
 }
 
 /**
+ * How many old passwords a cipher keeps.
+ *
+ * Five is what Bitwarden's own clients keep. The server does not enforce a
+ * number, so the client is the only thing standing between this list and
+ * unbounded growth inside every cipher it touches.
+ */
+export const PASSWORD_HISTORY_LIMIT = 5;
+
+/**
  * The request body for `POST /api/ciphers`.
  *
  * New items carry no per-cipher key: fields are encrypted directly under the
@@ -144,7 +153,19 @@ export async function encryptUpdatedCipher(
   // correct, but copying makes "I did not mean to change the password"
   // impossible to get wrong, and lets a test assert it byte for byte.
   if (draft.password !== null) {
+    const replaced = login.password;
     login.password = await encryptToString(utf8(draft.password), cipherKey);
+    // The old ciphertext, verbatim — no decryption and no re-encryption,
+    // because it is already in hand. Nothing is filed when there was no
+    // password to replace: a history entry for a password that never existed
+    // would be a lie the web vault then displays.
+    if (typeof replaced === "string" && replaced !== "") {
+      const existing = Array.isArray(raw.passwordHistory) ? raw.passwordHistory : [];
+      body.passwordHistory = [{ password: replaced, lastUsedDate: nowIso }, ...existing].slice(
+        0,
+        PASSWORD_HISTORY_LIMIT,
+      );
+    }
   }
 
   const uris = urisOf(login);
