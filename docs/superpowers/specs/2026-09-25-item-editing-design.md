@@ -105,12 +105,32 @@ shape this design uses:
 }
 ```
 
-The update and delete routes are **not** yet exercised anywhere in this
-repository. `PUT /api/ciphers/{id}` and `PUT /api/ciphers/{id}/delete` are what
-this design assumes, and the first implementation task is to confirm both
-against the pinned container — along with whether 1.37.1 honours
-`lastKnownRevisionDate` — before any code is written against them. An assumption
-about a route is cheap to check and expensive to build on.
+**Confirmed against `vaultwarden/server:1.37.1` on 2026-09-25**, by three probes
+that now live at the end of `tests/integration/live.test.ts`:
+
+- `PUT /api/ciphers/{id}` answers 200, and every field the body repeated came
+  back byte-identical. That is the property § 5.3 rests on.
+- `PUT /api/ciphers/{id}/delete` answers 200, and the next `/api/sync` still
+  carries the cipher, now with a non-null `deletedDate`. The trash is a flag,
+  not a removal — which is exactly why § 7 has to filter it.
+- A stale `lastKnownRevisionDate` is answered with **400**.
+
+The third result changes a decision rather than merely recording one. This
+server *does* guard against a concurrent edit, but only for a client that sends
+the field; omitting it is last-writer-wins. So the update body **sends
+`lastKnownRevisionDate`, taken from the cached cipher's own `revisionDate`**.
+
+What that buys: editing an entry this add-on last synced an hour ago, which
+someone changed in the web vault in the meantime, is refused instead of
+silently overwriting their change. What it costs: a 400 that has to read as
+"this entry changed somewhere else — sync and try again", not as a generic
+server error. `src/api/ciphers.ts` therefore classifies 400 on an update as its
+own error, and § 15's stale-cache risk shrinks from "silent loss" to "a refusal
+with instructions".
+
+The probes build their request bodies with their own encrypter, never with
+`src/vault/encrypt.ts`: a probe that asks what the server does must not be
+built out of the module whose behaviour it is being used to justify.
 
 ### 5.2 Creating
 

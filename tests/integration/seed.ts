@@ -232,7 +232,7 @@ export async function seedCipher(
   accessToken: string,
   userKey: SymKey,
   opts: SeedCipherOpts,
-): Promise<void> {
+): Promise<string> {
   // An organization cipher is encrypted under the ORGANIZATION key, not the
   // user key — that is the whole point of the org path in decryptVault.
   const parentKey = opts.organization?.orgKey ?? userKey;
@@ -290,6 +290,19 @@ export async function seedCipher(
           body: JSON.stringify({ cipher: body, collectionIds: org.collectionIds }),
         });
   if (!res.ok) throw new Error(`Cipher creation failed: ${res.status} ${await res.text()}`);
+
+  // The server id, so a test can address the cipher it just made. Checked
+  // rather than cast: this is a network response like any other.
+  const created: unknown = await res.json();
+  if (
+    typeof created !== "object" ||
+    created === null ||
+    !("id" in created) ||
+    typeof created.id !== "string"
+  ) {
+    throw new Error("Cipher creation returned no id");
+  }
+  return created.id;
 }
 
 /** The plaintext of every seeded login, so tests can assert on decryption. */

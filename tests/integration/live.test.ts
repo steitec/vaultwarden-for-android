@@ -3,6 +3,7 @@ import { writeFileSync } from "node:fs";
 import {
   waitForServer,
   seedAccount,
+  seedCipher,
   seedVault,
   SEEDED,
   SERVER,
@@ -20,9 +21,34 @@ import { isSyncResponse, isRawCipher, isPreloginResponse } from "../../src/api/t
 import { performLogin } from "../../src/background/login";
 import { decryptVault } from "../../src/vault/index";
 import { generateTotp } from "../../src/totp";
+import type { SymKey } from "../../src/crypto/encstring";
+import { toBase64, concat, utf8 } from "../../src/crypto/bytes";
 import syncFixture from "../fixtures/sync-1.37.1.json";
 
 const DEVICE = "integration-test";
+
+/**
+ * The suite's own type-2 encrypter, deliberately NOT `src/vault/encrypt.ts`.
+ *
+ * These probes ask what the SERVER does with a well-formed body. Building
+ * that body with the module under test would make the probe agree with
+ * whatever that module happens to do, which is the opposite of what a probe
+ * is for.
+ */
+async function encryptForProbe(text: string, key: SymKey): Promise<string> {
+  const iv = crypto.getRandomValues(new Uint8Array(16));
+  const ck = await crypto.subtle.importKey("raw", key.encKey, "AES-CBC", false, ["encrypt"]);
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-CBC", iv }, ck, utf8(text)));
+  const mk = await crypto.subtle.importKey(
+    "raw",
+    key.macKey,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", mk, concat(iv, ct)));
+  return `2.${toBase64(iv)}|${toBase64(ct)}|${toBase64(mac)}`;
+}
 
 /**
  * A structural fingerprint: which keys the server actually sends, ignoring
@@ -262,6 +288,102 @@ describe("live Vaultwarden", () => {
       // expectation, re-read syncAttempt.
       const second = await refreshToken(SERVER, original);
       expect(second.access_token).toBeTruthy();
+    }, 60000);
+  });
+  /**
+   * What the 2026-09-25 design assumes about writing, asked of the real
+   * server before any code is built on it. Deliberately LAST in the file:
+   * these tests add ciphers, and the shape-signature test above compares the
+   * whole vault against a committed fixture.
+   */
+  describe("write routes", () => {
+    it("updates a cipher with PUT /api/ciphers/{id}", async () => {
+      const account = await seedAccount();
+      const id = await seedCipher(account.accessToken, account.userKey, {
+        name: "Route Probe",
+        username: "probe-user",
+        password: "probe-pass",
+        uris: ["https://probe.example"],
+      });
+
+      const before = await sync(SERVER, account.accessToken);
+      const raw = before.ciphers.find((c) => c.id === id);
+      expect(raw).toBeDefined();
+
+      // A full replace that changes the name and repeats everything else.
+      const res = await fetch(`${SERVER}/api/ciphers/${id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${account.accessToken}`,
+        },
+        body: JSON.stringify({ ...raw, name: await encryptForProbe("Renamed", account.userKey) }),
+      });
+      expect(res.status).toBe(200);
+
+      const after = await sync(SERVER, account.accessToken);
+      const updated = after.ciphers.find((c) => c.id === id);
+      expect(updated?.name).not.toBe(raw?.name);
+      // The fields the body repeated came back untouched, which is what the
+      // whole preserve-by-repeating approach rests on.
+      expect(updated?.login?.username).toBe(raw?.login?.username);
+      expect(updated?.login?.password).toBe(raw?.login?.password);
+    }, 60000);
+
+    it("moves a cipher to the trash with PUT /api/ciphers/{id}/delete, and sync then carries deletedDate", async () => {
+      const account = await seedAccount();
+      const id = await seedCipher(account.accessToken, account.userKey, {
+        name: "Trash Probe",
+        password: "probe-pass",
+      });
+
+      const res = await fetch(`${SERVER}/api/ciphers/${id}/delete`, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${account.accessToken}` },
+      });
+      expect(res.status).toBe(200);
+
+      const after = await sync(SERVER, account.accessToken);
+      // Read as `unknown` and narrowed here rather than through RawCipher:
+      // this probe runs BEFORE the type learns about deletedDate, and it is
+      // the evidence that the field is worth adding at all.
+      const trashed: unknown = after.ciphers.find((c) => c.id === id);
+      // Still on the wire: this is the trash, not deletion. Which is exactly
+      // why decryptVault has to filter it.
+      expect(trashed).toBeDefined();
+      expect(trashed).toHaveProperty("deletedDate");
+      const deletedDate =
+        typeof trashed === "object" && trashed !== null && "deletedDate" in trashed
+          ? trashed.deletedDate
+          : null;
+      expect(deletedDate).not.toBeNull();
+    }, 60000);
+
+    it("records what a stale lastKnownRevisionDate does here", async () => {
+      const account = await seedAccount();
+      const id = await seedCipher(account.accessToken, account.userKey, {
+        name: "Revision Probe",
+        password: "probe-pass",
+      });
+      const before = await sync(SERVER, account.accessToken);
+      const raw = before.ciphers.find((c) => c.id === id);
+
+      const res = await fetch(`${SERVER}/api/ciphers/${id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${account.accessToken}`,
+        },
+        body: JSON.stringify({ ...raw, lastKnownRevisionDate: "2000-01-01T00:00:00.000Z" }),
+      });
+
+      // Not an assertion about which answer is right — a recording of which
+      // answer this server gives, so the design can stop guessing. 400 means
+      // the server guards against a concurrent edit; 200 means it does not,
+      // and a last-writer-wins race is a risk this client carries.
+      // eslint-disable-next-line no-console
+      console.log(`[probe] stale lastKnownRevisionDate -> ${res.status}`);
+      expect([200, 400]).toContain(res.status);
     }, 60000);
   });
 });
