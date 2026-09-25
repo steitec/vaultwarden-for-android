@@ -677,6 +677,43 @@ describe("Controller", () => {
       return h;
     }
 
+    it("refreshes and retries exactly once when the server rejects the access token", async () => {
+      const h = await unlockedWithRefreshToken();
+      const calls: string[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string) => {
+          calls.push(url);
+          if (!url.includes("/api/sync")) {
+            return {
+              ok: true,
+              status: 200,
+              json: async () => ({ access_token: "at", refresh_token: "rt2", expires_in: 3600 }),
+              text: async () => "",
+            };
+          }
+          const firstSync = calls.filter((c) => c.includes("/api/sync")).length === 1;
+          return firstSync
+            ? { ok: false, status: 401, json: async () => ({}), text: async () => "" }
+            : {
+                ok: true,
+                status: 200,
+                json: async () => JSON.parse(await cacheOf(DEFAULT_SEEDS)),
+                text: async () => "",
+              };
+        }),
+      );
+
+      await h.controller.syncNow();
+
+      // Twice, never three times: a retry that can recurse turns a server
+      // rejecting every token into an infinite loop.
+      expect(calls.filter((c) => c.includes("/api/sync"))).toHaveLength(2);
+      expect(
+        calls.filter((c) => c.includes("/identity/connect/token")).length,
+      ).toBeGreaterThanOrEqual(1);
+    }, 20000);
+
     it("replaces the cache with a freshly synced vault", async () => {
       const h = await unlockedWithRefreshToken();
       vi.stubGlobal("fetch", stubServer(200, JSON.parse(await cacheOf([
