@@ -213,3 +213,26 @@ body {
 .settings-confirm .action {
   margin: 8px var(--pad) 0;
 }
+
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.editor .note {
+  margin: 0;
+  font-size: 0.85em;
+  opacity: 0.8;
+}
+
+.editor .actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.confirm-question {
+  flex-basis: 100%;
+  margin: 0;
+}
