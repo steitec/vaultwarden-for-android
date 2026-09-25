@@ -29,7 +29,8 @@ const MIN_PIN_LENGTH = 6;
 /** Below this, the unlock screen starts saying how little room is left. */
 const ATTEMPT_WARNING_THRESHOLD = 3;
 
-type FieldOptions = {
+/** Exported with the helpers below, for `editor.ts`. */
+export type FieldOptions = {
   label: string;
   type: string;
   value?: string;
@@ -38,7 +39,11 @@ type FieldOptions = {
   autocomplete?: string;
 };
 
-function field(id: string, o: FieldOptions): { row: HTMLLabelElement; input: HTMLInputElement } {
+/**
+ * Exported for `editor.ts`, so the two forms in this popup cannot drift
+ * apart: one definition of what a labelled field looks like, not two.
+ */
+export function field(id: string, o: FieldOptions): { row: HTMLLabelElement; input: HTMLInputElement } {
   const row = document.createElement("label");
   row.className = "field";
   row.htmlFor = id;
@@ -61,7 +66,8 @@ function field(id: string, o: FieldOptions): { row: HTMLLabelElement; input: HTM
   return { row, input };
 }
 
-function errorSlot(): HTMLParagraphElement {
+/** Exported for `editor.ts`; see `field`. */
+export function errorSlot(): HTMLParagraphElement {
   const p = document.createElement("p");
   p.className = "error";
   // role=alert so a screen reader announces a refusal the user did not
@@ -70,14 +76,16 @@ function errorSlot(): HTMLParagraphElement {
   return p;
 }
 
-function paragraph(className: string, text: string): HTMLParagraphElement {
+/** Exported for `editor.ts`; see `field`. */
+export function paragraph(className: string, text: string): HTMLParagraphElement {
   const p = document.createElement("p");
   p.className = className;
   p.textContent = text;
   return p;
 }
 
-function button(id: string, label: string, type: "submit" | "button"): HTMLButtonElement {
+/** Exported for `editor.ts`; see `field`. */
+export function button(id: string, label: string, type: "submit" | "button"): HTMLButtonElement {
   const b = document.createElement("button");
   b.id = id;
   b.type = type;
