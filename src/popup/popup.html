@@ -9,7 +9,10 @@
   <body>
     <header id="status" class="status"></header>
     <nav id="settings" class="settings" hidden></nav>
-    <input id="search" class="search" type="search" placeholder="Search vault" autocomplete="off" />
+    <div class="toolbar">
+      <input id="search" class="search" type="search" placeholder="Search vault" autocomplete="off" />
+      <button id="new-item" class="new-item" type="button" title="New entry" hidden>+</button>
+    </div>
     <p id="error" class="banner" role="alert" hidden></p>
     <main id="root"></main>
     <script src="popup.js"></script>
