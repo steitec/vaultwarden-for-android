@@ -112,12 +112,30 @@ describe("decryptVault", () => {
     expect(items[0]!.name).not.toBe("GitHub");
     expect(items[0]!.name).toMatch(/cannot be decrypted/i);
   });
+
+  it("skips ciphers that are in the trash", async () => {
+    const p = await payload({ deletedDate: "2026-09-01T10:00:00.000Z" });
+    expect(await decryptVault(p, userKey, new Map())).toEqual([]);
+  });
+
+  it("keeps ciphers whose deletedDate is explicitly null", async () => {
+    // Absent and null both mean "not trashed"; a real vault contains both,
+    // depending on which client last touched the item.
+    const p = await payload({ deletedDate: null });
+    expect((await decryptVault(p, userKey, new Map())).length).toBe(1);
+  });
+
+  it("reports which organization an item belongs to", async () => {
+    const [personal] = await decryptVault(await payload(), userKey, new Map());
+    expect(personal!.organizationId).toBeNull();
+  });
+
 });
 
 describe("searchItems", () => {
   const items: VaultItem[] = [
-    { id: "1", name: "GitHub", username: "octocat", password: null, totp: null, uris: [], favorite: false, undecryptable: false },
-    { id: "2", name: "GitLab", username: "fox", password: null, totp: null, uris: [{ uri: "https://gitlab.com", match: null }], favorite: false, undecryptable: false },
+    { id: "1", name: "GitHub", username: "octocat", password: null, totp: null, uris: [], favorite: false, organizationId: null, undecryptable: false },
+    { id: "2", name: "GitLab", username: "fox", password: null, totp: null, uris: [{ uri: "https://gitlab.com", match: null }], favorite: false, organizationId: null, undecryptable: false },
   ];
 
   it("matches on name, case-insensitively", () => {
@@ -139,8 +157,8 @@ describe("searchItems", () => {
 
 describe("matchItems", () => {
   const items: VaultItem[] = [
-    { id: "1", name: "GitHub", username: "a", password: null, totp: null, uris: [{ uri: "https://github.com", match: null }], favorite: false, undecryptable: false },
-    { id: "2", name: "Other", username: "b", password: null, totp: null, uris: [{ uri: "https://example.com", match: null }], favorite: false, undecryptable: false },
+    { id: "1", name: "GitHub", username: "a", password: null, totp: null, uris: [{ uri: "https://github.com", match: null }], favorite: false, organizationId: null, undecryptable: false },
+    { id: "2", name: "Other", username: "b", password: null, totp: null, uris: [{ uri: "https://example.com", match: null }], favorite: false, organizationId: null, undecryptable: false },
   ];
 
   it("returns only items matching the page url", () => {
@@ -161,6 +179,7 @@ describe("matchItems", () => {
         totp: null,
         uris: [{ uri: "https://example.com/login", match: 5 }],
         favorite: false,
+        organizationId: null,
         undecryptable: false,
       },
     ];
