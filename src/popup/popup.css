@@ -236,3 +236,25 @@ body {
   flex-basis: 100%;
   margin: 0;
 }
+
+.toolbar {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.toolbar .search {
+  flex: 1;
+}
+
+.new-item {
+  flex: 0 0 auto;
+  font-size: 1.25rem;
+  line-height: 1;
+  padding: 0.35rem 0.7rem;
+}
+
+.item-edit {
+  margin-left: auto;
+  opacity: 0.7;
+}

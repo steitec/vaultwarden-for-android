@@ -14,6 +14,14 @@ export type ItemSummary = {
   username: string | null;
   hasTotp: boolean;
   undecryptable: boolean;
+  /**
+   * Whether this row may offer an edit affordance. False for an organization
+   * item and for one that will not decrypt.
+   *
+   * The interface is not the guard — the controller refuses those writes on
+   * its own — this only keeps the popup from offering a door that is locked.
+   */
+  editable: boolean;
 };
 
 /**

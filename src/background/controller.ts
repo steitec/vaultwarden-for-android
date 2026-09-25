@@ -75,6 +75,7 @@ function summarize(i: VaultItem): ItemSummary {
     username: i.username,
     hasTotp: i.totp !== null,
     undecryptable: i.undecryptable,
+    editable: i.organizationId === null && !i.undecryptable,
   };
 }
 
