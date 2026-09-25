@@ -141,6 +141,19 @@ eventually be somebody's bug report. Full write-ups in `docs/DEVELOPMENT.md` →
   server, which is exactly the gap the overnight run of 2026-08-27/28 existed
   to close for the idle lock.
 
+- **The editor has never run on a phone.** Built 2026-09-25 with the unit suite
+  and the live-container suite green, and neither can reach what actually
+  matters here. Three checks, all on the device:
+
+  1. Create an entry on the phone, then fill it on a real page.
+  2. Add notes to an entry in the web vault, change that entry in the add-on,
+     then find the notes still there. This is the failure mode the whole
+     design was written around — `PUT /api/ciphers/{id}` is a full replace, so
+     a body built from the wrong thing deletes them silently. The integration
+     suite covers it against the pinned container; the device adds the real
+     account and the real network.
+  3. Delete an entry and find it in the web vault's trash.
+
 ---
 
 ## 3.1 Licence notice missing from the built bundle
@@ -162,7 +175,7 @@ that wants its own verification rather than a footnote in someone else's task.
 ## 4. Deferred to v2
 
 Unchanged and still just a list, kept in `docs/DEVELOPMENT.md` → "Deferred to
-v2": item creation and editing, save-password prompts, Sends and attachments,
+v2": save-password prompts, Sends and attachments,
 card and identity types, passkeys, multiple accounts, WebSocket push sync, a
 refresh mechanism for the embedded public suffix list (the list itself is
 complete; it is a build-time snapshot), and a TOTP display in the popup.

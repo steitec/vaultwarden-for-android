@@ -102,6 +102,18 @@ function makeSpies(c: Controller) {
     setup: vi.spyOn(c, "setup").mockResolvedValue({ ok: true }),
     syncNow: vi.spyOn(c, "syncNow").mockResolvedValue(undefined),
     setUnlockMode: vi.spyOn(c, "setUnlockMode").mockResolvedValue(undefined),
+    detailFor: vi.spyOn(c, "detailFor").mockReturnValue({
+      id: "c1",
+      name: "GitHub",
+      username: "octocat",
+      uri: "https://github.com",
+      otherUriCount: 0,
+      hasPassword: true,
+      editable: true,
+    }),
+    createItem: vi.spyOn(c, "createItem").mockResolvedValue(undefined),
+    updateItem: vi.spyOn(c, "updateItem").mockResolvedValue(undefined),
+    deleteItem: vi.spyOn(c, "deleteItem").mockResolvedValue(undefined),
   };
 }
 
@@ -145,6 +157,17 @@ const EVERY_KIND: unknown[] = [
   { kind: "setup", serverUrl: "https://v.test", email: "a@b.com", password: "p", pin: "135790" },
   { kind: "sync" },
   { kind: "setUnlockMode", mode: "session" },
+  { kind: "itemDetail", itemId: "c1" },
+  {
+    kind: "createItem",
+    draft: { name: "n", username: "u", uri: "https://e.test", password: "p" },
+  },
+  {
+    kind: "updateItem",
+    itemId: "c1",
+    draft: { name: "n", username: "u", uri: "https://e.test", password: null },
+  },
+  { kind: "deleteItem", itemId: "c1" },
 ];
 
 describe("handleMessage sender verification", () => {
@@ -211,6 +234,49 @@ describe("handleMessage request validation", () => {
     ["fill with a NaN tabId", { kind: "fill", tabId: Number.NaN, itemId: "c1" }],
     ["fill with no itemId", { kind: "fill", tabId: 7 }],
     ["totp with no itemId", { kind: "totp" }],
+    ["itemDetail with no itemId", { kind: "itemDetail" }],
+    ["itemDetail with a non-string itemId", { kind: "itemDetail", itemId: 7 }],
+    ["deleteItem with no itemId", { kind: "deleteItem" }],
+    ["createItem with no draft", { kind: "createItem" }],
+    ["createItem with a string draft", { kind: "createItem", draft: "n" }],
+    ["createItem with a null draft", { kind: "createItem", draft: null }],
+    [
+      "createItem with a missing draft field",
+      { kind: "createItem", draft: { name: "n", username: "u", uri: "https://e.test" } },
+    ],
+    [
+      "createItem with a non-string draft field",
+      {
+        kind: "createItem",
+        draft: { name: 7, username: "u", uri: "https://e.test", password: "p" },
+      },
+    ],
+    // `undefined` is NOT the same as `null` here: null means "leave the
+    // stored password alone", and a dropped field must not silently acquire
+    // that meaning.
+    [
+      "createItem with an undefined password rather than null",
+      {
+        kind: "createItem",
+        draft: { name: "n", username: "u", uri: "https://e.test", password: undefined },
+      },
+    ],
+    [
+      "updateItem with no itemId",
+      {
+        kind: "updateItem",
+        draft: { name: "n", username: "u", uri: "https://e.test", password: null },
+      },
+    ],
+    [
+      "updateItem with a non-string itemId",
+      {
+        kind: "updateItem",
+        itemId: 7,
+        draft: { name: "n", username: "u", uri: "https://e.test", password: null },
+      },
+    ],
+    ["updateItem with no draft", { kind: "updateItem", itemId: "c1" }],
     // Declared in the brief's union but deliberately not part of the API
     // yet: `copy` arrives in Task 15 with its handler. Until then it must
     // be rejected outright, not dispatched into a runtime default.

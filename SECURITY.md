@@ -107,6 +107,33 @@ keyguard, so that trade is not available here and was not made.
 The cost is real and it is the second point above: on a phone someone else
 picks up, "unlocked" lasts much longer than fifteen minutes.
 
+## Writing to the vault
+
+Three write calls exist — create, update and trash — all to the server address
+you entered, and all of them encrypt in the background page before anything
+leaves it. Each one is followed by a full sync, so the offline copy on the
+device is never anything but a response the server sent.
+
+**The promise about the panel is unchanged, word for word: no decrypted
+password crosses the message boundary into it.** The editor shows an empty
+password field on an entry that already has one, because it is never told what
+the old password is. Leaving that field empty copies the stored ciphertext into
+the new item without decrypting it at any point. What the panel learns about a
+password is one bit: whether there is one. That bit is what the "this will
+replace the existing password" question is built from.
+
+An edit rebuilds the item from the copy the server last sent, changing four
+values and repeating everything else untouched — notes, custom fields, a TOTP
+secret, the folder. This is a data-loss guard rather than a security one, but
+it is the same principle: the client does not invent anything it was not told.
+
+Two limits worth stating plainly:
+
+- **A write is retried on a 401 and on nothing else.** Any other retry risks a
+  second copy of an item the server already stored.
+- **Deleting means the trash.** The item is flagged, not removed, and the web
+  vault can restore it. This add-on cannot delete permanently.
+
 ## What is stored, and where
 
 `browser.storage.local` holds one record. In full: the server URL and email; the

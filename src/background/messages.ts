@@ -14,6 +14,54 @@ export type ItemSummary = {
   username: string | null;
   hasTotp: boolean;
   undecryptable: boolean;
+  /**
+   * Whether this row may offer an edit affordance. False for an organization
+   * item and for one that will not decrypt.
+   *
+   * The interface is not the guard — the controller refuses those writes on
+   * its own — this only keeps the popup from offering a door that is locked.
+   */
+  editable: boolean;
+};
+
+/**
+ * What the editor is given for an existing entry.
+ *
+ * The sibling of `ItemSummary`, and it keeps the same rule: NO password field
+ * on the type. `hasPassword` carries exactly one bit — that there is one —
+ * which is what the overwrite confirmation is built from. Anything more would
+ * be a decrypted password crossing this boundary, which is the guarantee
+ * SECURITY.md makes.
+ *
+ * `uri` is the FIRST uri and `otherUriCount` is how many the form is not
+ * showing, so the editor can promise they will survive rather than leaving
+ * the user to guess.
+ */
+export type ItemDraftView = {
+  id: string;
+  name: string;
+  username: string | null;
+  uri: string | null;
+  otherUriCount: number;
+  hasPassword: boolean;
+  /** False for an organization item, and for one that will not decrypt. */
+  editable: boolean;
+};
+
+/**
+ * What the editor sends back.
+ *
+ * Structurally identical to `ItemDraft` in vault/encrypt.ts and deliberately
+ * re-declared rather than imported: this module is the wire contract, and it
+ * must not drag the crypto layer into the popup bundle's type graph.
+ * `isItemDraft` is what makes the two agree at runtime.
+ */
+export type ItemDraftMessage = {
+  name: string;
+  username: string;
+  uri: string;
+  /** null means "leave the stored password alone". */
+  password: string | null;
 };
 
 export type Status = {
@@ -107,10 +155,21 @@ export type Request =
       twoFactor?: { token: string; provider: number };
     }
   | { kind: "sync" }
-  | { kind: "setUnlockMode"; mode: UnlockMode; pin?: string };
+  | { kind: "setUnlockMode"; mode: UnlockMode; pin?: string }
+  | { kind: "itemDetail"; itemId: string }
+  | { kind: "createItem"; draft: ItemDraftMessage }
+  | { kind: "updateItem"; itemId: string; draft: ItemDraftMessage }
+  | { kind: "deleteItem"; itemId: string };
 
 /** `void` covers the kinds that answer with an acknowledgement only. */
-export type Response = Status | ItemSummary[] | PageMatches | TotpCode | SetupResult | void;
+export type Response =
+  | Status
+  | ItemSummary[]
+  | ItemDraftView
+  | PageMatches
+  | TotpCode
+  | SetupResult
+  | void;
 
 function isString(v: unknown): v is string {
   return typeof v === "string";
@@ -125,6 +184,30 @@ function isTwoFactor(v: unknown): v is { token: string; provider: number } {
   if (typeof v !== "object" || v === null) return false;
   if (!("token" in v) || !("provider" in v)) return false;
   return isString(v.token) && typeof v.provider === "number" && Number.isFinite(v.provider);
+}
+
+/**
+ * Every field checked, not merely present.
+ *
+ * These strings go straight into encryption and into a URL comparison: a
+ * non-string `name` would reach `String.prototype.trim`, a non-string
+ * `password` would reach `TextEncoder.encode`.
+ *
+ * `password` is `string | null`, and `undefined` is NOT accepted. "Absent"
+ * and "leave the stored password alone" have to be the same explicit value on
+ * the wire — otherwise a field dropped in transit would quietly mean "keep
+ * the old password" on a create, which is a request that cannot be satisfied
+ * at all.
+ */
+function isItemDraft(v: unknown): v is ItemDraftMessage {
+  if (typeof v !== "object" || v === null) return false;
+  if (!("name" in v) || !("username" in v) || !("uri" in v) || !("password" in v)) return false;
+  return (
+    isString(v.name) &&
+    isString(v.username) &&
+    isString(v.uri) &&
+    (v.password === null || isString(v.password))
+  );
 }
 
 /**
@@ -177,6 +260,13 @@ export function isRequest(v: unknown): v is Request {
       );
     case "unlock":
       return "pin" in v && isString(v.pin);
+    case "itemDetail":
+    case "deleteItem":
+      return "itemId" in v && isString(v.itemId);
+    case "createItem":
+      return "draft" in v && isItemDraft(v.draft);
+    case "updateItem":
+      return "itemId" in v && isString(v.itemId) && "draft" in v && isItemDraft(v.draft);
     case "list":
       return "query" in v && isString(v.query);
     case "fill":
