@@ -305,6 +305,7 @@ describe("Controller", () => {
 
     const items = await controller.list("");
     expect(Object.keys(items[0]!).sort()).toEqual([
+      "editable",
       "hasTotp",
       "id",
       "name",

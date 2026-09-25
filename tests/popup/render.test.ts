@@ -45,6 +45,7 @@ const github: ItemSummary = {
   username: "octocat",
   hasTotp: true,
   undecryptable: false,
+  editable: true,
 };
 const bare: ItemSummary = {
   id: "2",
@@ -52,6 +53,7 @@ const bare: ItemSummary = {
   username: null,
   hasTotp: false,
   undecryptable: false,
+  editable: true,
 };
 const items: ItemSummary[] = [github, bare];
 
@@ -96,6 +98,7 @@ describe("renderList", () => {
           username: null,
           hasTotp: false,
           undecryptable: true,
+          editable: false,
         },
       ],
       root,
@@ -112,6 +115,7 @@ describe("renderList", () => {
           username: null,
           hasTotp: false,
           undecryptable: false,
+          editable: true,
         },
       ],
       root,
@@ -132,6 +136,7 @@ describe("renderList", () => {
           username: "<script>alert(1)</script>",
           hasTotp: false,
           undecryptable: false,
+          editable: true,
         },
       ],
       root,

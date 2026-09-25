@@ -10,7 +10,10 @@ import type { Status } from "../../src/background/messages";
 const SKELETON = `
   <header id="status" class="status"></header>
   <nav id="settings" class="settings" hidden></nav>
-  <input id="search" class="search" type="search" />
+  <div class="toolbar">
+    <input id="search" class="search" type="search" />
+    <button id="new-item" class="new-item" type="button" hidden>+</button>
+  </div>
   <p id="error" class="banner" role="alert" hidden></p>
   <main id="root"></main>
 `;
@@ -84,10 +87,13 @@ type Item = {
   username: string | null;
   hasTotp: boolean;
   undecryptable: boolean;
+  editable: boolean;
 };
 
 function item(id: string, name: string, undecryptable = false): Item {
-  return { id, name, username: null, hasTotp: false, undecryptable };
+  // An undecryptable entry is never editable: there is nothing to build an
+  // update out of.
+  return { id, name, username: null, hasTotp: false, undecryptable, editable: !undecryptable };
 }
 
 type Responder = (req: unknown) => unknown;
@@ -135,6 +141,19 @@ function defaultResponder(overrides: Partial<Record<string, () => unknown>> = {}
           : { state: "unlocked", items: [] };
       case "list":
         return [item("l1", "Listed")];
+      case "itemDetail":
+        return {
+          id: "l1",
+          name: "Listed",
+          username: "octocat",
+          uri: "https://listed.example",
+          otherUriCount: 0,
+          hasPassword: true,
+          editable: true,
+        };
+      case "createItem":
+      case "updateItem":
+      case "deleteItem":
       case "fill":
       case "lock":
       case "signOut":
@@ -1153,5 +1172,114 @@ describe("fill", () => {
     requireEl("root").dispatchEvent(new Event("click", { bubbles: true }));
     await Promise.resolve();
     expect(sentKinds()).not.toContain("fill");
+  });
+});
+
+describe("the editor", () => {
+  it("opens empty from the + button, with the active tab's origin prefilled", async () => {
+    install(defaultResponder(), [{ url: "https://example.test/login" }]);
+    await main();
+
+    tap(document, "#new-item");
+
+    await vi.waitFor(() => expect(document.getElementById("editor-name")).not.toBeNull());
+    expect(requireInput("editor-uri").value).toBe("https://example.test");
+    expect(requireInput("editor-name").value).toBe("");
+    expect(requireInput("editor-password").value).toBe("");
+  });
+
+  it("sends createItem with exactly what was typed, then returns to the list", async () => {
+    install(defaultResponder(), [{ url: "https://example.test/login" }]);
+    await main();
+    tap(document, "#new-item");
+    await vi.waitFor(() => expect(document.getElementById("editor-name")).not.toBeNull());
+
+    requireInput("editor-name").value = "New";
+    requireInput("editor-password").value = "secret";
+    submitForm(document);
+
+    await vi.waitFor(() => expect(sentKinds()).toContain("createItem"));
+    expect(sentOf("createItem")[0]).toEqual({
+      kind: "createItem",
+      draft: { name: "New", username: "", uri: "https://example.test", password: "secret" },
+    });
+    await vi.waitFor(() => expect(document.querySelector(".item")).not.toBeNull());
+  });
+
+  it("opens the editor from its own affordance, and fills nothing", async () => {
+    // The row tap fills. That must not become ambiguous.
+    install(defaultResponder(), [{ url: "https://example.test/login" }]);
+    await main();
+    await vi.waitFor(() => expect(document.querySelector(".item-edit")).not.toBeNull());
+
+    tap(document, ".item-edit");
+
+    await vi.waitFor(() => expect(sentKinds()).toContain("itemDetail"));
+    expect(sentKinds()).not.toContain("fill");
+  });
+
+  it("draws no edit affordance for an entry the background says is not editable", async () => {
+    install(
+      defaultResponder({ list: () => [{ ...item("org1", "Org Item"), editable: false }] }),
+      [],
+    );
+    await main();
+
+    await vi.waitFor(() => expect(document.querySelector(".item")).not.toBeNull());
+    expect(document.querySelector(".item-edit")).toBeNull();
+  });
+
+  it("sends updateItem with a null password when the field was left empty", async () => {
+    install(defaultResponder(), [{ url: "https://example.test/login" }]);
+    await main();
+    await vi.waitFor(() => expect(document.querySelector(".item-edit")).not.toBeNull());
+    tap(document, ".item-edit");
+    await vi.waitFor(() => expect(document.getElementById("editor-name")).not.toBeNull());
+
+    requireInput("editor-name").value = "Renamed";
+    submitForm(document);
+
+    await vi.waitFor(() => expect(sentKinds()).toContain("updateItem"));
+    expect(sentOf("updateItem")[0]).toMatchObject({
+      // m1, not l1: with a tab URL present the first list is the page
+      // matches, which is what the editor was opened from.
+      itemId: "m1",
+      draft: { name: "Renamed", password: null },
+    });
+  });
+
+  it("reports a refused save in the form, not as a blank panel", async () => {
+    install(
+      defaultResponder({
+        createItem: () => {
+          throw new Error("This entry changed somewhere else. Sync and try again.");
+        },
+      }),
+      [{ url: "https://example.test/login" }],
+    );
+    await main();
+    tap(document, "#new-item");
+    await vi.waitFor(() => expect(document.getElementById("editor-name")).not.toBeNull());
+    requireInput("editor-name").value = "New";
+    requireInput("editor-password").value = "secret";
+    submitForm(document);
+
+    await vi.waitFor(() =>
+      expect(requireEl("root").textContent).toContain("changed somewhere else"),
+    );
+    // Still the editor, with what was typed.
+    expect(requireInput("editor-name").value).toBe("New");
+  });
+
+  it("hides the + button when the vault is not unlocked", async () => {
+    install(defaultResponder({ status: () => LOCKED }), []);
+    await main();
+    expect(requireEl("new-item").hidden).toBe(true);
+  });
+
+  it("shows the + button once the vault is open", async () => {
+    install(defaultResponder(), []);
+    await main();
+    expect(requireEl("new-item").hidden).toBe(false);
   });
 });

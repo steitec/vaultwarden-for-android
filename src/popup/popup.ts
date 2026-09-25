@@ -1,4 +1,5 @@
 import type {
+  ItemDraftView,
   ItemSummary,
   PageMatches,
   Request,
@@ -7,6 +8,7 @@ import type {
 } from "../background/messages";
 import type { UnlockMode } from "../session/store";
 import { errorText, PinRejected } from "./errors";
+import { renderEditor, teardownEditor, type EditorModel } from "./editor";
 import {
   renderSettings,
   renderSetup,
@@ -194,7 +196,27 @@ function isItemSummary(v: unknown): v is ItemSummary {
   if (!("username" in v) || (v.username !== null && typeof v.username !== "string")) return false;
   if (!("hasTotp" in v) || typeof v.hasTotp !== "boolean") return false;
   if (!("undecryptable" in v) || typeof v.undecryptable !== "boolean") return false;
-  return true;
+  return "editable" in v && typeof v.editable === "boolean";
+}
+
+/**
+ * The editor's view of one entry.
+ *
+ * Checked field by field like every other answer from the background: a
+ * malformed one must be refused here rather than rendering a form whose
+ * values are `undefined`. Note what is NOT checked, because it is not there:
+ * a password.
+ */
+function isItemDraftView(v: unknown): v is ItemDraftView {
+  const nullableString = (x: unknown): boolean => x === null || typeof x === "string";
+  if (typeof v !== "object" || v === null) return false;
+  if (!("id" in v) || typeof v.id !== "string") return false;
+  if (!("name" in v) || typeof v.name !== "string") return false;
+  if (!("username" in v) || !nullableString(v.username)) return false;
+  if (!("uri" in v) || !nullableString(v.uri)) return false;
+  if (!("otherUriCount" in v) || typeof v.otherUriCount !== "number") return false;
+  if (!("hasPassword" in v) || typeof v.hasPassword !== "boolean") return false;
+  return "editable" in v && typeof v.editable === "boolean";
 }
 
 function isItemSummaryList(v: unknown): v is ItemSummary[] {
@@ -332,6 +354,17 @@ export function renderList(items: ItemSummary[], container: HTMLElement): void {
       row.append(totp);
     }
 
+    if (item.editable) {
+      // A span inside the row button, not a nested <button>: nesting a button
+      // inside a button is invalid HTML and does not receive clicks reliably.
+      // The row's own handler tells the two apart by the event target.
+      const edit = document.createElement("span");
+      edit.className = "item-edit";
+      edit.textContent = "Edit";
+      edit.setAttribute("role", "button");
+      row.append(edit);
+    }
+
     container.append(row);
   }
 }
@@ -418,6 +451,7 @@ export async function main(): Promise<void> {
   const search = searchEl instanceof HTMLInputElement ? searchEl : null;
   const banner = document.getElementById("error");
   const settings = document.getElementById("settings");
+  const newItem = document.getElementById("new-item");
 
   // Set by the vault screen and read by the click handler, which is wired
   // once and outlives any single render.
@@ -535,10 +569,35 @@ export async function main(): Promise<void> {
       });
     }
 
+    newItem?.addEventListener("click", () => {
+      void (async () => {
+        try {
+          await showEditor(null);
+        } catch (e) {
+          showBanner(banner, errorText(e));
+        }
+      })();
+    });
+
     root.addEventListener("click", (event) => {
       void (async () => {
         const target = event.target;
         if (!(target instanceof Element)) return;
+
+        if (target.classList.contains("item-edit")) {
+          // An edit tap is not a fill tap. Decided before anything reads
+          // tabId or checks undecryptable, so the two paths cannot blur.
+          const editRow = target.closest(".item");
+          const editId = editRow instanceof HTMLElement ? editRow.dataset.id : undefined;
+          if (editId === undefined) return;
+          try {
+            await showEditor(editId);
+          } catch (e) {
+            showBanner(banner, errorText(e));
+          }
+          return;
+        }
+
         const row = target.closest(".item");
         if (!(row instanceof HTMLElement)) return;
         const itemId = row.dataset.id;
@@ -572,6 +631,71 @@ export async function main(): Promise<void> {
     });
   }
 
+  /**
+   * The editor, as a screen of its own.
+   *
+   * Replaces the whole of #root exactly as the unlock and setup screens do,
+   * and takes the ROUTE claim rather than the list claim: a list paint issued
+   * before this must not land on top of the form.
+   *
+   * `itemId === null` means a new entry.
+   */
+  async function showEditor(itemId: string | null): Promise<void> {
+    const current = claimRoute();
+    let model: EditorModel;
+    let onDelete: (() => Promise<void>) | null = null;
+
+    if (itemId === null) {
+      const tab = await activeTab();
+      let origin = "";
+      try {
+        origin = tab?.url === undefined ? "" : new URL(tab.url).origin;
+      } catch {
+        // about:blank and friends parse to nothing usable. An empty URL field
+        // is the right answer, not a stack trace.
+      }
+      model = {
+        mode: "create",
+        name: "",
+        username: "",
+        uri: origin,
+        otherUriCount: 0,
+        hasPassword: false,
+      };
+    } else {
+      const answer = await request({ kind: "itemDetail", itemId });
+      if (!isItemDraftView(answer)) throw new UnexpectedResponseError();
+      model = {
+        mode: "edit",
+        name: answer.name,
+        username: answer.username ?? "",
+        uri: answer.uri ?? "",
+        otherUriCount: answer.otherUriCount,
+        hasPassword: answer.hasPassword,
+      };
+      onDelete = async () => {
+        await request({ kind: "deleteItem", itemId });
+        await route();
+      };
+    }
+
+    if (!current()) return;
+    clearBanner(banner);
+    renderEditor(root, model, {
+      onSave: async (draft) => {
+        await request(
+          itemId === null
+            ? { kind: "createItem", draft }
+            : { kind: "updateItem", itemId, draft },
+        );
+        // Back to the list, which the write's own sync has already refreshed.
+        await route();
+      },
+      onDelete,
+      onCancel: () => void route(),
+    });
+  }
+
   async function showVault(mode: UnlockMode): Promise<void> {
     // A list claim, not the route's: this is the initial list for a screen
     // that is already up, and it races the same way a keystroke's list does.
@@ -583,6 +707,7 @@ export async function main(): Promise<void> {
       search.disabled = false;
       search.hidden = false;
     }
+    if (newItem !== null) newItem.hidden = false;
     if (settings !== null) {
       settings.hidden = false;
       renderSettings(settings, mode, {
@@ -727,6 +852,7 @@ export async function main(): Promise<void> {
         statusEl.textContent = "Unavailable";
         renderMessage(errorText(e), root, "error");
         if (search !== null) search.disabled = true;
+        if (newItem !== null) newItem.hidden = true;
         hideSettings();
         return;
       }
@@ -746,6 +872,9 @@ export async function main(): Promise<void> {
       search.disabled = true;
       search.hidden = true;
     }
+    // Nothing below this line talks to the vault, and neither may the editor:
+    // creating an entry needs an unlocked vault to encrypt under.
+    if (newItem !== null) newItem.hidden = true;
     hideSettings();
     clearBanner(banner);
 
@@ -782,6 +911,10 @@ export async function main(): Promise<void> {
   try {
     const port = browser.runtime.connect({ name: "popup" });
     port.onMessage.addListener(() => {
+      // BEFORE the re-route, not after: route() awaits a status request, and
+      // a typed password must not sit in the DOM across that await. See F-5,
+      // and §10 of the 2026-09-25 design.
+      teardownEditor(root);
       void route();
     });
   } catch {
