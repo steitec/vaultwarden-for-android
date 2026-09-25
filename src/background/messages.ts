@@ -16,6 +16,46 @@ export type ItemSummary = {
   undecryptable: boolean;
 };
 
+/**
+ * What the editor is given for an existing entry.
+ *
+ * The sibling of `ItemSummary`, and it keeps the same rule: NO password field
+ * on the type. `hasPassword` carries exactly one bit — that there is one —
+ * which is what the overwrite confirmation is built from. Anything more would
+ * be a decrypted password crossing this boundary, which is the guarantee
+ * SECURITY.md makes.
+ *
+ * `uri` is the FIRST uri and `otherUriCount` is how many the form is not
+ * showing, so the editor can promise they will survive rather than leaving
+ * the user to guess.
+ */
+export type ItemDraftView = {
+  id: string;
+  name: string;
+  username: string | null;
+  uri: string | null;
+  otherUriCount: number;
+  hasPassword: boolean;
+  /** False for an organization item, and for one that will not decrypt. */
+  editable: boolean;
+};
+
+/**
+ * What the editor sends back.
+ *
+ * Structurally identical to `ItemDraft` in vault/encrypt.ts and deliberately
+ * re-declared rather than imported: this module is the wire contract, and it
+ * must not drag the crypto layer into the popup bundle's type graph.
+ * `isItemDraft` is what makes the two agree at runtime.
+ */
+export type ItemDraftMessage = {
+  name: string;
+  username: string;
+  uri: string;
+  /** null means "leave the stored password alone". */
+  password: string | null;
+};
+
 export type Status = {
   state: "empty" | "locked" | "unlocked";
   lastSyncMs: number | null;
@@ -110,7 +150,14 @@ export type Request =
   | { kind: "setUnlockMode"; mode: UnlockMode; pin?: string };
 
 /** `void` covers the kinds that answer with an acknowledgement only. */
-export type Response = Status | ItemSummary[] | PageMatches | TotpCode | SetupResult | void;
+export type Response =
+  | Status
+  | ItemSummary[]
+  | ItemDraftView
+  | PageMatches
+  | TotpCode
+  | SetupResult
+  | void;
 
 function isString(v: unknown): v is string {
   return typeof v === "string";
