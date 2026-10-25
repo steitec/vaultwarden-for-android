@@ -1,6 +1,6 @@
 # Vaultwarden for Android
 
-[![CI](https://github.com/numnim2209/vaultwarden-for-android/actions/workflows/ci.yml/badge.svg)](https://github.com/numnim2209/vaultwarden-for-android/actions/workflows/ci.yml)
+[![CI](https://github.com/steitec/vaultwarden-for-android/actions/workflows/ci.yml/badge.svg)](https://github.com/steitec/vaultwarden-for-android/actions/workflows/ci.yml)
 
 A Firefox for Android add-on that unlocks a self-hosted Vaultwarden vault and
 fills logins into pages.
