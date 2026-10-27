@@ -1,5 +1,22 @@
 import { build } from "vite";
+import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+
+/**
+ * A `/*! ... *\/` banner with the LICENSE file of each bundled package, so
+ * the notice MIT requires travels with the built file (BACKLOG 3.1). It is
+ * prepended after the build: Vite's final transpile step in library mode
+ * drops a Rollup `output.banner`.
+ */
+function licenceBanner(root, packages) {
+  return packages
+    .map((pkg) => {
+      const text = readFileSync(resolve(root, "node_modules", pkg, "LICENSE"), "utf8");
+      const body = text.trim().split("\n").map((l) => ` * ${l}`.trimEnd()).join("\n");
+      return `/*! Bundled: ${pkg}\n *\n${body}\n */`;
+    })
+    .join("\n");
+}
 
 /**
  * Build a single entry point into one fully self-contained CLASSIC script:
@@ -28,6 +45,7 @@ export async function buildClassicEntry({
   globalName,
   root = process.cwd(),
   outDir = "dist",
+  licences = [],
 }) {
   await build({
     root,
@@ -51,4 +69,9 @@ export async function buildClassicEntry({
       },
     },
   });
+
+  if (licences.length > 0) {
+    const file = resolve(root, outDir, `${name}.js`);
+    writeFileSync(file, `${licenceBanner(root, licences)}\n${readFileSync(file, "utf8")}`);
+  }
 }

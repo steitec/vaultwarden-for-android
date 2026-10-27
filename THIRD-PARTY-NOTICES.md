@@ -31,10 +31,9 @@ derivation.
 > OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 > SOFTWARE.
 
-**Known gap:** the bundler does not carry this notice into `dist/background.js`,
-so a signed XPI redistributes the code without it. The notice here covers the
-repository; closing it for the built artefact is an open item in
-`docs/BACKLOG.md`.
+The build prepends this notice, read from the package's own `LICENSE`, to
+`dist/background.js` (`scripts/build-classic-entry.mjs`), so it ships with the
+built artefact as well.
 
 ## Public Suffix List
 

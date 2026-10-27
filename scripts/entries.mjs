@@ -10,6 +10,9 @@ export const ENTRIES = [
     name: "background",
     input: "src/background/index.ts",
     globalName: "VaultwardenBackground",
+    // npm packages bundled into this entry whose licence requires the notice
+    // to ship with the code.
+    licences: ["hash-wasm"],
   },
   {
     name: "autofill",

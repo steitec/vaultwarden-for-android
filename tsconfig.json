@@ -8,7 +8,7 @@
     "resolveJsonModule": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "types": ["firefox-webext-browser", "vitest/globals"]
+    "types": ["firefox-webext-browser", "vitest/globals", "node"]
   },
   "include": ["src", "tests"]
 }
