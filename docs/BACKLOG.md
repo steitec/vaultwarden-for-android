@@ -158,6 +158,12 @@ eventually be somebody's bug report. Full write-ups in `docs/DEVELOPMENT.md` →
 
 ## 3.1 Licence notice missing from the built bundle
 
+**Done 2026-10-27:** `scripts/build-classic-entry.mjs` prepends the LICENSE of
+every package listed under `licences` in `scripts/entries.mjs` (today:
+`hash-wasm` in `background.js`); `tests/build-classic-scripts.test.ts` checks
+the built file. Done together with the vite 5 → 7 update, which dropped the
+`/*!` header that had survived by accident until then.
+
 Found 2026-08-29 while licensing the repository for publication. `hash-wasm` is
 MIT and is bundled into `dist/background.js`; its copyright notice does not
 survive the bundler, so a signed XPI redistributes the code without the notice

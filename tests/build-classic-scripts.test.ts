@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import vm from "node:vm";
 import { buildClassicEntry } from "../scripts/build-classic-entry.mjs";
+import { ENTRIES } from "../scripts/entries.mjs";
 
 // Firefox loads MV2 `background.scripts` and `content_scripts` as CLASSIC
 // scripts, not ES modules. `import`/`export` in those files is a
@@ -142,5 +143,23 @@ describe("classic script build (regression guard for MV2 background/content scri
     expect(() => vm.runInContext(source, vm.createContext(sandbox))).not.toThrow();
     expect(addListener).toHaveBeenCalledTimes(1);
     expect(onConnectListener).toHaveBeenCalledTimes(1);
+  });
+
+  it("carries the MIT notice of every bundled package into the built file (BACKLOG 3.1)", async () => {
+    // A leading comment in a dependency survives the bundler only by accident
+    // (vite 7 drops hash-wasm's `/*!` header because the statement it is
+    // attached to is tree-shaken), so the notice is emitted as a banner from
+    // the package's own LICENSE file.
+    workDir = mkdtempSync(join(tmpdir(), "vw-build-notice-"));
+    const entry = ENTRIES.find((e) => e.name === "background")!;
+    await buildClassicEntry({ ...entry, root: process.cwd(), outDir: join(workDir, "dist") });
+
+    const source = readFileSync(join(workDir, "dist", "background.js"), "utf8");
+    const licence = readFileSync("node_modules/hash-wasm/LICENSE", "utf8");
+    const head = source.slice(0, source.indexOf("var VaultwardenBackground"));
+    expect(head).toContain("hash-wasm");
+    for (const line of licence.split("\n").map((l) => l.trim()).filter(Boolean)) {
+      expect(head).toContain(line);
+    }
   });
 });
