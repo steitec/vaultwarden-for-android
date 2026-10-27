@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi, type Mock } from "vitest";
 import { Controller } from "../../src/background/controller";
 import { Session } from "../../src/session/session";
 import type { StoredState } from "../../src/session/store";
@@ -659,7 +659,7 @@ describe("handOff", () => {
   } as const;
   const UNLOCKED_STATUS = { ...LOCKED_STATUS, state: "unlocked" } as const;
 
-  let openPopup: ReturnType<typeof vi.fn>;
+  let openPopup: Mock<() => Promise<void>>;
 
   beforeEach(() => {
     openPopup = vi.fn().mockResolvedValue(undefined);
