@@ -15,11 +15,11 @@
     "sign:unlisted": "npm test && npm run package && web-ext sign -s dist --channel=unlisted --upload-source-code=source.zip"
   },
   "devDependencies": {
-    "@types/firefox-webext-browser": "^120.0.0",
+    "@types/firefox-webext-browser": "^143.0.1",
     "@types/node": "^22.20.5",
-    "jsdom": "^28.1.0",
-    "typescript": "^5.6.0",
-    "vite": "^7.3.7",
+    "jsdom": "^30.1.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
     "vitest": "^5.0.5",
     "web-ext": "^10.8.0"
   },
