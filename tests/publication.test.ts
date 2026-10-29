@@ -4,8 +4,9 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 /**
- * The owner's domain is allowed to survive publication in exactly one shape:
- * the extension id. Anything else — a vault hostname, a test site — is private
+ * The owner's domain is allowed to survive publication in exactly two shapes:
+ * the extension id, and a URL of the bare public homepage (the README logo
+ * links there). Anything else — a vault hostname, a test site — is private
  * infrastructure and must not be in a public repository.
  *
  * Note the domain is derived from the id rather than written out, so this file
@@ -41,7 +42,9 @@ describe("no private hostname survives in tracked files", () => {
         // characters back and require an exact match.
         const from = at - (EXTENSION_ID.length - OWNER_DOMAIN.length);
         const context = from < 0 ? "" : text.slice(from, at + OWNER_DOMAIN.length);
-        if (context !== EXTENSION_ID) {
+        // A subdomain would put a "." right before the domain, not "://".
+        const homepage = text.slice(at - 3, at) === "://";
+        if (context !== EXTENSION_ID && !homepage) {
           const line = text.slice(0, at).split("\n").length;
           offenders.push(`${file}:${line}`);
         }
