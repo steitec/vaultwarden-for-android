@@ -125,7 +125,7 @@ npm run build     # writes dist/
 npm run lint:ext  # addons-linter against dist/
 ```
 
-Node 22.12.0 is what this is developed and built on.
+Node 22.23.4 is what this is developed and built on.
 
 `npm run test:integration` starts a pinned Vaultwarden container, runs the live
 suite against it and tears it down. It needs Docker. It talks only to the

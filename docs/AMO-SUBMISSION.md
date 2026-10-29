@@ -117,7 +117,7 @@ roughly 110 files, about 430 KB zipped and 1.3 MB unpacked.
 AMO requires that the submitted source actually build. Include this text in the
 "build instructions" box:
 
-> Requires Node.js 22.12.0 (or any 22.x LTS) and npm.
+> Requires Node.js 22.23.4 (or a later 22.x LTS) and npm.
 >
 > ```
 > npm ci

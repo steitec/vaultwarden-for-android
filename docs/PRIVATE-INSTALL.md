@@ -43,7 +43,7 @@ button goes away with it, so there is nothing left to install from.
 
 - An account on <https://addons.mozilla.org/> (a normal Firefox account works),
   **with two-factor authentication enabled** — see Step 1, it is enforced.
-- Node.js 22.12.0 and `npm ci` already run, per `docs/DEVELOPMENT.md`.
+- Node.js 22.23.4 and `npm ci` already run, per `docs/DEVELOPMENT.md`.
 - `adb` on the machine, if you want the tidy way to move the file to the phone.
 - Firefox for Android **122 or newer** on the phone. Any current release is fine.
   This is the release app, `org.mozilla.firefox` — not Nightly.
