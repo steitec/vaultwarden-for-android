@@ -36,7 +36,7 @@ function licenceBanner(root, packages) {
  * build only ever sees a single entry, Rollup has no second entry to diff
  * against and therefore nothing to extract into a shared chunk — the entry
  * and everything it statically imports are inlined into one file.
- * `inlineDynamicImports: true` closes the same gap for any dynamic
+ * `codeSplitting: false` closes the same gap for any dynamic
  * `import()` calls within that one entry's own graph.
  */
 export async function buildClassicEntry({
@@ -62,9 +62,15 @@ export async function buildClassicEntry({
         name: globalName,
         fileName: () => `${name}.js`,
       },
-      rollupOptions: {
+      rolldownOptions: {
         output: {
-          inlineDynamicImports: true,
+          codeSplitting: false,
+          // Rolldown's default ("auto") drops the directive from an IIFE,
+          // which would run the whole add-on in sloppy mode.
+          strict: true,
+          // Source comments only make the shipped file larger. Legal ones
+          // stay; the licence banner is prepended below anyway.
+          comments: { legal: true, annotation: false, jsdoc: false },
         },
       },
     },

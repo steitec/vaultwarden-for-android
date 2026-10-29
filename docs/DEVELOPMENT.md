@@ -6,7 +6,7 @@ the backlog only points at them.
 
 ## Prerequisites
 
-- Node.js **v22.12.0** (the version this project is developed and built on).
+- Node.js **v22.23.4** (the version this project is developed and built on).
 - `npm ci` to install exactly the lockfile's dependency tree.
 - Docker, but only for `npm run test:integration`.
 

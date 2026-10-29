@@ -14,7 +14,7 @@ npm ci
 npm test
 ```
 
-Node 22.12.0. `npm test` runs the typechecker and then the unit suite; it needs
+Node 22.23.4. `npm test` runs the typechecker and then the unit suite; it needs
 no network and no Docker, and it must be green before anything else is worth
 discussing.
 
