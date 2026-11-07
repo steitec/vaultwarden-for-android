@@ -73,12 +73,49 @@ async function write(
   if (!res.ok) throw new CipherWriteFailedError(res.status);
 }
 
+/**
+ * The user an access token belongs to: its `sub` claim.
+ *
+ * Vaultwarden 1.37.4 made `encryptedFor` a required field of every cipher
+ * write. Without it the body does not deserialize and the answer is 422; on a
+ * create the server also refuses any value but the requesting user's own id,
+ * which it takes from this same token. Reading it from the token rather than
+ * from the cached sync means it is the exact value the server compares
+ * against, whatever the cache holds. Older servers ignore the field.
+ *
+ * The signature is not checked and does not need to be: this client decides
+ * nothing on the claim, it only repeats it back to the server that issued it.
+ */
+function userIdFromAccessToken(token: string): string {
+  const unreadable = new Error(
+    "The add-on could not read its sign-in token. Sign out and sign in again.",
+  );
+  const payload = token.split(".")[1];
+  if (payload === undefined || payload === "") throw unreadable;
+
+  let claims: unknown;
+  try {
+    const b64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = b64.padEnd(Math.ceil(b64.length / 4) * 4, "=");
+    const bytes = Uint8Array.from(atob(padded), (c) => c.charCodeAt(0));
+    claims = JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    throw unreadable;
+  }
+  if (typeof claims !== "object" || claims === null || !("sub" in claims)) throw unreadable;
+  const sub = claims.sub;
+  if (typeof sub !== "string" || sub === "") throw unreadable;
+  return sub;
+}
+
 export async function createCipher(
   server: string,
   accessToken: string,
   body: Record<string, unknown>,
 ): Promise<void> {
-  await write(server, accessToken, "/api/ciphers", "POST", { body });
+  // Spread first, so the token's user always wins over anything in `body`.
+  const withOwner = { ...body, encryptedFor: userIdFromAccessToken(accessToken) };
+  await write(server, accessToken, "/api/ciphers", "POST", { body: withOwner });
 }
 
 export async function updateCipher(
@@ -87,8 +124,9 @@ export async function updateCipher(
   id: string,
   body: Record<string, unknown>,
 ): Promise<void> {
+  const withOwner = { ...body, encryptedFor: userIdFromAccessToken(accessToken) };
   await write(server, accessToken, `/api/ciphers/${encodeURIComponent(id)}`, "PUT", {
-    body,
+    body: withOwner,
     conflictOn400: true,
   });
 }

@@ -32,10 +32,10 @@ and the second factor at hand.
 
 ## I. Install
 
-- [ ] I1 Firefox on the phone is **142 or newer** (Settings → About Firefox).
+- [x] I1 Firefox on the phone is **142 or newer** (Settings → About Firefox).
       The add-on requires it since 2026-11-07; older versions refuse the
       install. It was 154.0 on 2026-08-29, so this should pass.
-- [ ] I2 The new build installs **over** 0.3.0 and the vault is still set up:
+- [x] I2 The new build installs **over** 0.3.0 and the vault is still set up:
       the PIN pad comes up, not the setup form, and the right PIN opens the
       list.
 
@@ -44,23 +44,36 @@ and the second factor at hand.
 Merged 2026-08-30 and never run on a phone. With the vault open, in the settings panel: "Unlock without a PIN" →
 "Turn the PIN off".
 
-- [ ] P1 Restart Firefox (swipe it away, open it again). The master-password
+- [x] P1 Restart Firefox (swipe it away, open it again). The master-password
       screen comes up **without a PIN field**. Sign in. Then look in the settings panel:
       the PIN is **still off**.
       _Why:_ `setup()` has to keep the mode for the same account. If this is
       wrong the option turns itself off once a day, quietly.
-- [ ] P2 Unlock, then leave the phone asleep for well over fifteen minutes
+- [!] P2 Unlock, then leave the phone asleep for well over fifteen minutes
       (half an hour is fine). Wake it and open the popup: the vault is **still
       open**.
       _Why:_ the opposite of C3 in the 2026-08-25 run. Without a PIN no idle
       deadline is set, so a frozen process must wake up unlocked.
-- [ ] P3 **New 2026-11-07.** Restart Firefox so the vault is locked. Open a
+      
+      -> addon asked for master password
+
+      2026-11-07: not the add-on — Android killed Firefox while asleep, so
+      this was a restart. See **F-6**. Run again after changing the battery
+      setting.
+
+- [!] P3 **New 2026-11-07.** Restart Firefox so the vault is locked. Open a
       login page that has exactly one entry, clear both fields, tap the badge.
       Then sign in with the master password in the popup. The page is filled
       **without a second tap**.
       _Why:_ until 2026-11-07 a tap was only redeemed after a PIN, so in this
       mode it was lost after every restart. Same as D7a, but through the
       master password.
+      
+      -> tab the badge does nothing
+
+      2026-11-07: open, see **F-8**. Nothing visible on the tap is expected
+      on Android (D7a); what counts is whether the page is filled after the
+      sign-in.
 
 Turn the PIN back on afterwards, unless you want to keep using the mode.
 
@@ -68,8 +81,15 @@ Turn the PIN back on afterwards, unless you want to keep using the mode.
 
 Built 2026-09-25 and never run on a phone.
 
-- [ ] W1 Create an entry in the add-on (name, username, password, URL of a
+- [!] W1 Create an entry in the add-on (name, username, password, URL of a
       real login page). Open that page and fill it from the badge.
+      
+      -> creation of a new entry is not possible:
+      "The server could not save this change (status 422). Try again in a moment."
+
+      2026-11-07: reproduced and fixed, see **F-7**. Needs a new build
+      (0.3.2) to run again; W2 would have failed the same way.
+
 - [ ] W2 In the **web vault**, add notes to an entry. In the add-on, change
       that entry's password. Back in the web vault: the notes are **still
       there**.
@@ -126,4 +146,51 @@ Nightly alone; the steps and expected results are in
 
 ## Findings
 
-None yet.
+### F-6 — Android ends Firefox in the background (P2)
+
+Not a defect in the add-on. The phone's event log (`adb logcat -b events`)
+shows the Firefox process started at 14:13:14 after the P1 restart and
+killed by Android at 14:25:57 (`am_kill … org.mozilla.firefox`), while the
+phone was asleep. `cmd appops get org.mozilla.firefox RUN_ANY_IN_BACKGROUND`
+answers `ignore`: Firefox's battery setting is **Restricted**.
+
+Without a PIN the keys exist only in memory, by design, so a restarted
+Firefox has to ask for the master password. That is what P2 saw. It says
+nothing about a *frozen* process, which is what P2 is meant to test.
+
+To run P2 again: Android Settings → Apps → Firefox → Battery →
+**Unrestricted** (or Optimized), then repeat. If Android still ends Firefox
+(check with the same `adb` command), that is the platform's call and P2 is
+`[-]`, not a failure.
+
+Worth stating in the wiki: without a PIN, every time Android ends Firefox
+costs a master-password sign-in, and "Restricted" makes that much more
+frequent.
+
+### F-7 — Creating an entry fails with 422 on Vaultwarden 1.37.4 (W1)
+
+Root cause: Vaultwarden 1.37.4 made `encryptedFor` a required field of the
+cipher body (`CipherData`, "Added in web-v2025.6.0"). A body without it does
+not deserialize, and the answer is 422. On a create the server also refuses
+any value but the caller's own user id. The add-on never sent the field: it
+was built and tested against 1.37.1, where it did not exist, and the server
+went to 1.37.4 since. Updates (W2) would have failed the same way.
+
+Reproduced locally by running the integration suite against a 1.37.4
+container, which failed at exactly this point.
+
+Fixed in `src/api/ciphers.ts`: every create and update now sends
+`encryptedFor`, taken from the `sub` claim of the access token the request
+carries, which is the value the server compares against. 1.37.1 ignores the
+field. The integration suite is pinned to 1.37.4 now (registration moved to
+the two-step `register/send-verification-email` → `register/finish` there),
+and the sync fixture is recaptured from it as `tests/fixtures/sync-1.37.4.json`.
+Unit tests in `tests/api/ciphers.test.ts` → "encryptedFor".
+
+Lesson: the integration suite was pinned to a server older than the one
+in use. Bump the pin together with the server.
+
+### F-8 — Badge tap before a master-password sign-in (P3)
+
+Open: waiting for what happened after the tap. Questions are in the chat of
+2026-11-07; the result goes here.

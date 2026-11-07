@@ -24,33 +24,45 @@ afterEach(() => vi.unstubAllGlobals());
 
 const body = { type: 1, name: "2.aaa|bbb|ccc" };
 
+/**
+ * An access token shaped like Vaultwarden's: a JWT whose `sub` is the user's
+ * id. Unsigned, because the client never verifies it -- it only reads the
+ * claim the server will compare `encryptedFor` against.
+ */
+const USER_ID = "6d3c1f0e-2b1a-4c5d-9e8f-0a1b2c3d4e5f";
+function jwt(claims: Record<string, unknown>): string {
+  const part = (v: unknown) => Buffer.from(JSON.stringify(v)).toString("base64url");
+  return `${part({ typ: "JWT", alg: "RS256" })}.${part(claims)}.c2ln`;
+}
+const TOKEN = jwt({ sub: USER_ID, nbf: 0, exp: 4102444800 });
+
 describe("createCipher", () => {
   it("posts the body to /api/ciphers with a bearer token", async () => {
     const spy = stubFetch(200);
-    await createCipher("https://vault.example.net", "tok", body);
+    await createCipher("https://vault.example.net", TOKEN, body);
     const [url, init] = spy.mock.calls[0]!;
     expect(url).toBe("https://vault.example.net/api/ciphers");
     expect(init.method).toBe("POST");
-    expect(init.headers.Authorization).toBe("Bearer tok");
+    expect(init.headers.Authorization).toBe(`Bearer ${TOKEN}`);
     expect(init.headers["Content-Type"]).toBe("application/json");
-    expect(JSON.parse(init.body)).toEqual(body);
+    expect(JSON.parse(init.body)).toEqual({ ...body, encryptedFor: USER_ID });
   });
 
   it("strips a trailing slash from the server url", async () => {
     const spy = stubFetch(200);
-    await createCipher("https://vault.example.net/", "tok", body);
+    await createCipher("https://vault.example.net/", TOKEN, body);
     expect(spy.mock.calls[0]![0]).toBe("https://vault.example.net/api/ciphers");
   });
 
   it("raises UnauthorizedError for a 401, which is what the retry keys on", async () => {
     stubFetch(401);
-    const err = await createCipher("https://v.test", "tok", body).catch((e: unknown) => e);
+    const err = await createCipher("https://v.test", TOKEN, body).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(UnauthorizedError);
   });
 
   it("raises CipherWriteFailedError carrying the status for anything else", async () => {
     stubFetch(500);
-    const err = await createCipher("https://v.test", "tok", body).catch((e: unknown) => e);
+    const err = await createCipher("https://v.test", TOKEN, body).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(CipherWriteFailedError);
     expect((err as CipherWriteFailedError).status).toBe(500);
     expect(err).not.toBeInstanceOf(UnauthorizedError);
@@ -58,20 +70,20 @@ describe("createCipher", () => {
 
   it("does not treat a 400 on a create as a conflict: there is nothing to conflict with", async () => {
     stubFetch(400);
-    const err = await createCipher("https://v.test", "tok", body).catch((e: unknown) => e);
+    const err = await createCipher("https://v.test", TOKEN, body).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(CipherWriteFailedError);
     expect(err).not.toBeInstanceOf(CipherConflictError);
   });
 
   it("raises ServerUnreachableError when fetch itself rejects", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("NetworkError")));
-    const err = await createCipher("https://v.test", "tok", body).catch((e: unknown) => e);
+    const err = await createCipher("https://v.test", TOKEN, body).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ServerUnreachableError);
   });
 
   it("says something a user can act on", async () => {
     stubFetch(500);
-    const err = await createCipher("https://v.test", "tok", body).catch((e: unknown) => e);
+    const err = await createCipher("https://v.test", TOKEN, body).catch((e: unknown) => e);
     expect((err as Error).message).toMatch(/could not save/i);
   });
 });
@@ -79,16 +91,16 @@ describe("createCipher", () => {
 describe("updateCipher", () => {
   it("puts the body to /api/ciphers/{id}", async () => {
     const spy = stubFetch(200);
-    await updateCipher("https://v.test", "tok", "abc-123", body);
+    await updateCipher("https://v.test", TOKEN, "abc-123", body);
     const [url, init] = spy.mock.calls[0]!;
     expect(url).toBe("https://v.test/api/ciphers/abc-123");
     expect(init.method).toBe("PUT");
-    expect(JSON.parse(init.body)).toEqual(body);
+    expect(JSON.parse(init.body)).toEqual({ ...body, encryptedFor: USER_ID });
   });
 
   it("reads a 400 as a concurrent edit, because that is what a stale lastKnownRevisionDate gets", async () => {
     stubFetch(400);
-    const err = await updateCipher("https://v.test", "tok", "abc-123", body).catch(
+    const err = await updateCipher("https://v.test", TOKEN, "abc-123", body).catch(
       (e: unknown) => e,
     );
     expect(err).toBeInstanceOf(CipherConflictError);
@@ -97,7 +109,7 @@ describe("updateCipher", () => {
 
   it("still reports other failures as ordinary write failures", async () => {
     stubFetch(500);
-    const err = await updateCipher("https://v.test", "tok", "abc-123", body).catch(
+    const err = await updateCipher("https://v.test", TOKEN, "abc-123", body).catch(
       (e: unknown) => e,
     );
     expect(err).toBeInstanceOf(CipherWriteFailedError);
@@ -106,8 +118,48 @@ describe("updateCipher", () => {
 
   it("escapes an id that would otherwise change the path", async () => {
     const spy = stubFetch(200);
-    await updateCipher("https://v.test", "tok", "../accounts/profile", body);
+    await updateCipher("https://v.test", TOKEN, "../accounts/profile", body);
     expect(spy.mock.calls[0]![0]).toBe("https://v.test/api/ciphers/..%2Faccounts%2Fprofile");
+  });
+});
+
+// Vaultwarden 1.37.4 made `encryptedFor` a required field of every cipher
+// write: without it the body does not deserialize and the answer is 422, and
+// a create also refuses any value but the caller's own user id. That id is
+// the `sub` of the very token the request carries. Found on the device on
+// 2026-11-07 as "The server could not save this change (status 422)".
+describe("encryptedFor", () => {
+  it("is the token's own user on a create", async () => {
+    const spy = stubFetch(200);
+    await createCipher("https://v.test", TOKEN, body);
+    expect(JSON.parse(spy.mock.calls[0]![1].body).encryptedFor).toBe(USER_ID);
+  });
+
+  it("is the token's own user on an update", async () => {
+    const spy = stubFetch(200);
+    await updateCipher("https://v.test", TOKEN, "abc-123", body);
+    expect(JSON.parse(spy.mock.calls[0]![1].body).encryptedFor).toBe(USER_ID);
+  });
+
+  it("overrides anything the caller put there", async () => {
+    // The server compares it with the token's user. A body naming anybody
+    // else can only ever be refused.
+    const spy = stubFetch(200);
+    await createCipher("https://v.test", TOKEN, { ...body, encryptedFor: "someone-else" });
+    expect(JSON.parse(spy.mock.calls[0]![1].body).encryptedFor).toBe(USER_ID);
+  });
+
+  it.each([
+    ["not a JWT at all", "tok"],
+    ["a payload that is not JSON", "a.bm90IGpzb24.c2ln"],
+    ["no sub claim", jwt({ exp: 1 })],
+    ["an empty sub", jwt({ sub: "" })],
+  ])("refuses to write, without asking the server, for %s", async (_label, token) => {
+    const spy = stubFetch(200);
+    const err = await createCipher("https://v.test", token, body).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toMatch(/sign out and sign in again/i);
+    expect(spy).not.toHaveBeenCalled();
   });
 });
 

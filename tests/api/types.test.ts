@@ -7,7 +7,7 @@ import {
   isLoginTokenResponse,
   isTwoFactorChallenge,
 } from "../../src/api/types";
-import syncFixture from "../fixtures/sync-1.37.1.json";
+import syncFixture from "../fixtures/sync-1.37.4.json";
 import preloginFixture from "../fixtures/prelogin-1.37.1.json";
 
 /**

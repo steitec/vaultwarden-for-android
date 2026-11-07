@@ -23,6 +23,15 @@ export const PASSWORD = "integration-test-password";
 
 const KDF: KdfConfig = { kdf: 0, iterations: 600000, memory: null, parallelism: null, salt: null };
 
+/** The `sub` claim of a JWT, read without verifying it. */
+export function subOf(token: string): string {
+  const claims: unknown = JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString());
+  if (typeof claims !== "object" || claims === null || !("sub" in claims) || typeof claims.sub !== "string") {
+    throw new Error("Access token carries no sub claim");
+  }
+  return claims.sub;
+}
+
 async function encrypt(data: Bytes, key: SymKey): Promise<string> {
   const iv = crypto.getRandomValues(new Uint8Array(16));
   const ck = await crypto.subtle.importKey("raw", key.encKey, "AES-CBC", false, ["encrypt"]);
@@ -71,19 +80,35 @@ export async function seedAccount(): Promise<SeededAccount> {
   const pkcs8 = new Uint8Array(await crypto.subtle.exportKey("pkcs8", pair.privateKey));
   const spki = new Uint8Array(await crypto.subtle.exportKey("spki", pair.publicKey));
 
-  // Verified against vaultwarden/server:1.37.1: this is the registration
-  // endpoint. `/identity/register` and `/api/accounts/register` both 404.
-  const register = await fetch(`${SERVER}/identity/accounts/register`, {
+  // Two steps since vaultwarden/server 1.37.4, which removed the one-shot
+  // `/identity/accounts/register` (404 there; `/identity/register` and
+  // `/api/accounts/register` 404 as well). With no mail server configured,
+  // the first step answers with the verification token itself instead of
+  // mailing it. Both steps exist on 1.37.1 too, so one path serves both.
+  const verify = await fetch(`${SERVER}/identity/accounts/register/send-verification-email`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: EMAIL, name: "Integration Test", receiveMarketingEmails: false }),
+  });
+  if (!verify.ok) {
+    throw new Error(`Verification request failed: ${verify.status} ${await verify.text()}`);
+  }
+  const emailVerificationToken = (await verify.text()).replace(/^"|"$/g, "");
+
+  const register = await fetch(`${SERVER}/identity/accounts/register/finish`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       email: EMAIL,
-      name: "Integration Test",
+      emailVerificationToken,
       masterPasswordHash: hash,
-      key: protectedKey,
+      userSymmetricKey: protectedKey,
+      userAsymmetricKeys: {
+        publicKey: toBase64(spki),
+        encryptedPrivateKey: await encrypt(pkcs8, userKey),
+      },
       kdf: KDF.kdf,
       kdfIterations: KDF.iterations,
-      keys: { publicKey: toBase64(spki), encryptedPrivateKey: await encrypt(pkcs8, userKey) },
     }),
   });
   if (!register.ok && register.status !== 400) {
@@ -256,6 +281,9 @@ export async function seedCipher(
     key: itemKey,
     folderId: opts.folderId ?? null,
     organizationId: opts.organization?.id ?? null,
+    // Required since 1.37.4, and on a create it must be the caller's own id:
+    // the `sub` of the token this request carries. Ignored by 1.37.1.
+    encryptedFor: subOf(accessToken),
   };
 
   if (opts.notes !== undefined) body.notes = await encrypt(utf8(opts.notes), key);
@@ -337,7 +365,7 @@ export const SEEDED = {
  * accept, and returns the organization it created.
  *
  * This is the single definition of the test vault: `tests/fixtures/
- * sync-1.37.1.json` is a capture of exactly what this produces, so the fast
+ * sync-1.37.4.json` is a capture of exactly what this produces, so the fast
  * suite and the live suite can never drift apart.
  */
 export async function seedVault(account: SeededAccount): Promise<{ orgId: string }> {

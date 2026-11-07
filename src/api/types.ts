@@ -75,7 +75,7 @@ export type RawCipherUri = { uri: string | null; match: number | null };
  * A cipher as it comes off `/api/sync`.
  *
  * Optional (`?:`) versus nullable is not cosmetic here — it is transcribed
- * from a captured 1.37.1 response (`tests/fixtures/sync-1.37.1.json`).
+ * from a captured 1.37.4 response (`tests/fixtures/sync-1.37.4.json`).
  * Vaultwarden OMITS the login sub-fields it has no value for: a login with
  * no TOTP secret has no `totp` key at all, and one with no username has no
  * `username` key. An earlier version of this guard required them and
@@ -293,7 +293,7 @@ function isRawProfile(v: unknown): v is RawProfile {
  * unvalidated.
  *
  * What it must NOT do is reject fields the real server omits; see the
- * `RawCipher` doc comment and `tests/fixtures/sync-1.37.1.json`, a captured
+ * `RawCipher` doc comment and `tests/fixtures/sync-1.37.4.json`, a captured
  * response that this guard is tested against on every run.
  */
 export function isSyncResponse(v: unknown): v is SyncResponse {

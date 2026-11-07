@@ -1401,6 +1401,19 @@ describe("writing items", () => {
     return h;
   }
 
+  /**
+   * Shaped like Vaultwarden's own: a JWT whose `sub` is the user. Every write
+   * reads it to fill `encryptedFor`, so a bare "at" would be refused before
+   * the request is even sent (see tests/api/ciphers.test.ts).
+   */
+  const ACCESS_TOKEN = [
+    { typ: "JWT", alg: "RS256" },
+    { sub: "6d3c1f0e-2b1a-4c5d-9e8f-0a1b2c3d4e5f" },
+  ]
+    .map((p) => Buffer.from(JSON.stringify(p)).toString("base64url"))
+    .concat("c2ln")
+    .join(".");
+
   /** Answers the token endpoint and /api/sync, and records every call. */
   function recordingServer(calls: { url: string; method?: string }[], writeStatus = 200) {
     return vi.fn(async (url: string, init?: { method?: string }) => {
@@ -1412,7 +1425,7 @@ describe("writing items", () => {
         status: isWrite ? writeStatus : 200,
         json: async () =>
           url.includes("/identity/")
-            ? { access_token: "at", refresh_token: "rt2", expires_in: 3600 }
+            ? { access_token: ACCESS_TOKEN, refresh_token: "rt2", expires_in: 3600 }
             : JSON.parse(await cacheOf(DEFAULT_SEEDS)),
         text: async () => "",
       };
