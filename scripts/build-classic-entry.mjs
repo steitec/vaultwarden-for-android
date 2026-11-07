@@ -54,7 +54,7 @@ export async function buildClassicEntry({
     build: {
       outDir,
       emptyOutDir: false,
-      target: "firefox121",
+      target: "firefox142",
       minify: false,
       lib: {
         entry: resolve(root, input),

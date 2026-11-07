@@ -737,32 +737,32 @@ Not features that were postponed — these are true of the current build. Each
 one will eventually be somebody's bug report, so they are written down with
 enough detail to act on rather than as a line to rediscover.
 
-### A `<select>` username field is never filled
+### ~~A `<select>` username field is never filled~~ — fixed on `main` 2026-11-07
 
-`USERNAME_SELECTOR` in `src/content/autofill.ts` matches
-`input[type="text"]`, `input[type="email"]`, `input[type="tel"]` and
-`input:not([type])`. A `<select>` is not among them.
+Not in a release yet; 0.3.0 still has the gap.
 
-The concrete trigger is a FRITZ!Box with FRITZ!Benutzer configured: its login
-page then renders a user **dropdown** above the password field instead of a
-text input. `findLoginFields` returns `username: null`, `fillFields` skips the
-field, and the result is a filled password beside a dropdown still sitting on
-whatever it defaulted to. It looks like a partial success, which is worse than
-an obvious failure — the user submits and gets "wrong password".
+The trigger was a FRITZ!Box with FRITZ!Benutzer configured: its login page
+renders a user **dropdown** above the password field instead of a text input.
+`findLoginFields` returned `username: null`, and the result was a filled
+password beside an untouched dropdown — a partial success that ends in "wrong
+password".
 
-A fix touches two places, and the second is the one that is easy to get wrong:
+How it is fixed, in `src/content/autofill.ts`:
 
-- `findLoginFields` — widen the candidate query. The "last candidate preceding
-  the password field" logic uses `compareDocumentPosition`, which works on any
-  `Element`, so that half needs no change. The return type does: it is
-  `HTMLInputElement | null` today.
-- `setValue` — a `<select>` is not an `HTMLInputElement`. The native-setter
-  trick there exists specifically to defeat React's and Vue's shadowed `value`
-  property on inputs and does not transfer. A select needs its `value` set and
-  a `change` event, and setting a value no `<option>` carries silently does
-  nothing — that case has to be detected rather than reported as filled.
+- `findLoginFields` takes a `<select>` **only when the password's form has no
+  usable text input**. A domain or language dropdown next to a real username
+  field is common, and choosing it would break pages that work today. Same
+  form scoping and the same "last one before the password" rule as for text
+  inputs; disabled, `multiple` and hidden dropdowns are skipped.
+- `selectOption` picks the option whose `value`, or failing that whose
+  visible text, equals the username, and dispatches `input` and `change`. The
+  native-setter trick for inputs does not apply to a select. When no option
+  carries the username the dropdown is left untouched and `filledUsername` is
+  `false`, so a miss is never reported as a fill.
 
-jsdom covers all of this; no device work is needed to build it.
+Pinned by `tests/content/autofill.test.ts` → "a <select> username field".
+Never tried against a real FRITZ!Box; the fixture is written from the
+description above, not from a saved page.
 
 ### `http://[::1]` gets no badge
 

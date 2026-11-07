@@ -108,13 +108,13 @@ already seen, in either channel. So confirm these in `src/manifest.json` first.
   Version numbers are unique across *both* AMO channels, so a number spent on a
   private unlisted build can never be reused for a public listed one. Stay in
   `0.x` while testing privately and keep `1.0.0` for the public launch.
-- **`gecko_android` is present.** It is, at `strict_min_version: 121.0`.
+- **`gecko_android` is present.** It is, at `strict_min_version: 142.0`.
 
-Note on that 121: the *install-from-file* flow needs Firefox 122, so 121 promises
-one version more compatibility than you can actually deliver by this route. It is
-harmless for you — your phone is far past both — and raising it to `122.0` means
-touching `tests/manifest.test.ts`, which asserts the exact string. Left alone
-deliberately; decide it when you next touch the manifest.
+Note on that 142: it is the first Firefox for Android that understands
+`data_collection_permissions`, and below it `web-ext lint` warns. It also
+settles an older wrinkle: the *install-from-file* flow needs Firefox 122, so
+the 121 this used to say promised one version more than that route could
+deliver. Raised on 2026-11-07, desktop entry included.
 
 ## Step 3 — Build, lint, and make the source archive
 

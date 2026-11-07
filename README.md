@@ -29,7 +29,7 @@ use — an unlisted signature, which release Firefox for Android will install fr
 a file. [`docs/PRIVATE-INSTALL.md`](docs/PRIVATE-INSTALL.md) is the step-by-step
 route and has been walked end to end.
 
-Requires Firefox 121 or newer. Tested against Vaultwarden 1.37.1.
+Requires Firefox 142 or newer. Tested against Vaultwarden 1.37.1.
 
 ## What it does
 
