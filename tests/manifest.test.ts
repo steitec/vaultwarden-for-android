@@ -11,7 +11,16 @@ describe("manifest", () => {
     const bss = manifest.browser_specific_settings as {
       gecko_android?: { strict_min_version?: string };
     };
-    expect(bss.gecko_android?.strict_min_version).toBe("121.0");
+    expect(bss.gecko_android?.strict_min_version).toBe("142.0");
+  });
+
+  it("requires the Firefox that understands data_collection_permissions", () => {
+    // Firefox for Android supports the key from 142, desktop from 140. Below
+    // that, addons-linter warns that the minimum promises support the key
+    // cannot have. Both entries use 142 so one number describes the add-on,
+    // and the build target in scripts/build-classic-entry.mjs follows it.
+    const gecko = manifest.browser_specific_settings.gecko as { strict_min_version?: string };
+    expect(gecko.strict_min_version).toBe("142.0");
   });
 
   it("holds host permissions for every fillable origin, and no more", () => {
