@@ -14,9 +14,13 @@ fills logins into pages.
 > to the Vaultwarden project or to Bitwarden, Inc. It is a third-party client
 > that speaks the Bitwarden client API a Vaultwarden server implements.
 
+Walkthroughs — installing on a phone, everyday use, the security model, known
+limitations and troubleshooting — are in the
+[wiki](https://github.com/steitec/vaultwarden-for-android/wiki).
+
 ## Status
 
-Version 0.1.0. In daily use by its author since 2026-08-29, on release Firefox
+Version 0.3.0. In daily use by its author since 2026-08-29, on release Firefox
 for Android, from a build signed by Mozilla.
 
 **It is not listed on addons.mozilla.org**, so there is no install button.
