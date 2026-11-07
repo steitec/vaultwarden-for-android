@@ -828,3 +828,104 @@ describe("startObserving", () => {
     expect(sendMessage).not.toHaveBeenCalled();
   });
 });
+
+// A FRITZ!Box with FRITZ!Benutzer configured renders a user dropdown above the
+// password field instead of a text input. Before this, the password was filled
+// beside an untouched dropdown -- a partial success that ends in "wrong
+// password". See docs/DEVELOPMENT.md -> "A `<select>` username field".
+describe("a <select> username field", () => {
+  const FRITZ = `<form>
+    <select name="uiViewUser">
+      <option value="fritz1234">fritz1234</option>
+      <option value="ralf">ralf</option>
+    </select>
+    <input type="password" name="pw">
+  </form>`;
+
+  it("is found when the password's form has no text input", () => {
+    setBody(FRITZ);
+    expect(findLoginFields(document).username!.getAttribute("name")).toBe("uiViewUser");
+  });
+
+  it("never wins over a text input in the same form", () => {
+    // A domain or language dropdown between the username and the password is
+    // common, and choosing it would be a regression on every such page.
+    setBody(`<form>
+      <input type="text" name="user">
+      <select name="domain"><option>web.de</option><option>gmx.de</option></select>
+      <input type="password" name="pw">
+    </form>`);
+    expect(findLoginFields(document).username!.getAttribute("name")).toBe("user");
+  });
+
+  it("is not taken from another form", () => {
+    setBody(`<form><select name="lang"><option>de</option></select></form>
+      <form><input type="password" name="pw"></form>`);
+    expect(findLoginFields(document).username).toBeNull();
+  });
+
+  it("is not offered for a page without a password field", () => {
+    setBody(`<form><select name="lang"><option>de</option></select></form>`);
+    expect(findLoginFields(document).username).toBeNull();
+  });
+
+  it("skips a disabled or multiple-choice select", () => {
+    setBody(`<form>
+      <select name="a" disabled><option>ralf</option></select>
+      <select name="b" multiple><option>ralf</option></select>
+      <input type="password" name="pw">
+    </form>`);
+    expect(findLoginFields(document).username).toBeNull();
+  });
+
+  it("skips a select hidden by an ancestor", () => {
+    setBody(`<form>
+      <div style="display:none"><select name="decoy"><option>ralf</option></select></div>
+      <input type="password" name="pw">
+    </form>`);
+    expect(findLoginFields(document).username).toBeNull();
+  });
+
+  it("selects the option whose value is the username and reports it filled", () => {
+    setBody(FRITZ);
+    const r = fillFields(document, { username: "ralf", password: "hunter2" });
+    expect(r).toEqual({ filledUsername: true, filledPassword: true });
+    expect(document.querySelector<HTMLSelectElement>("select")!.value).toBe("ralf");
+    expect(document.querySelector<HTMLInputElement>('[name="pw"]')!.value).toBe("hunter2");
+  });
+
+  it("matches the visible text when the value is something else", () => {
+    setBody(`<form>
+      <select name="u"><option value="1">admin</option><option value="2">ralf</option></select>
+      <input type="password" name="pw">
+    </form>`);
+    fillFields(document, { username: "ralf", password: null });
+    expect(document.querySelector<HTMLSelectElement>("select")!.value).toBe("2");
+  });
+
+  it("dispatches input and change so the page observes the choice", () => {
+    setBody(FRITZ);
+    const select = document.querySelector<HTMLSelectElement>("select")!;
+    const seen: string[] = [];
+    select.addEventListener("input", () => seen.push("input"));
+    select.addEventListener("change", () => seen.push("change"));
+
+    fillFields(document, { username: "ralf", password: null });
+    expect(seen).toEqual(["input", "change"]);
+  });
+
+  it("leaves the select alone and reports false when no option carries the username", () => {
+    // Setting a value no <option> has silently selects nothing; reporting
+    // that as filled would be the partial success this exists to end.
+    setBody(FRITZ);
+    const select = document.querySelector<HTMLSelectElement>("select")!;
+    const seen: string[] = [];
+    select.addEventListener("change", () => seen.push("change"));
+
+    const r = fillFields(document, { username: "nobody", password: "hunter2" });
+
+    expect(r).toEqual({ filledUsername: false, filledPassword: true });
+    expect(select.value).toBe("fritz1234");
+    expect(seen).toEqual([]);
+  });
+});

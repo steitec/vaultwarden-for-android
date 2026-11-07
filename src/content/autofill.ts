@@ -125,8 +125,16 @@ function isUsable(el: HTMLInputElement, layoutAvailable: boolean): boolean {
   );
 }
 
+/** A single-choice dropdown the user could operate. `multiple` is never a username. */
+function isUsableSelect(el: HTMLSelectElement, layoutAvailable: boolean): boolean {
+  return !el.disabled && !el.multiple && isVisible(el, layoutAvailable);
+}
+
+/** The field a username goes into: normally a text input, rarely a dropdown. */
+export type UsernameField = HTMLInputElement | HTMLSelectElement;
+
 export function findLoginFields(doc: Document): {
-  username: HTMLInputElement | null;
+  username: UsernameField | null;
   password: HTMLInputElement | null;
 } {
   const layoutAvailable = hasLayout(doc);
@@ -162,7 +170,23 @@ export function findLoginFields(doc: Document): {
   const before = inScopeCandidates.filter(
     (c) => c.compareDocumentPosition(password) & Node.DOCUMENT_POSITION_FOLLOWING,
   );
-  return { username: before[before.length - 1] ?? inScopeCandidates[0] ?? null, password };
+  const textField = before[before.length - 1] ?? inScopeCandidates[0] ?? null;
+  if (textField !== null) return { username: textField, password };
+
+  // A dropdown only when the form offers no text input at all: a FRITZ!Box
+  // with FRITZ!Benutzer renders its users this way. Never ahead of a text
+  // input, because a domain or language dropdown beside a real username field
+  // is common, and filling that would break pages that work today. Same scope
+  // and the same "last one before the password" rule as above.
+  const selects = Array.from(doc.querySelectorAll("select")).filter(
+    (s) =>
+      isUsableSelect(s, layoutAvailable) &&
+      (passwordForm === null || s.closest("form") === passwordForm),
+  );
+  const selectBefore = selects.filter(
+    (s) => s.compareDocumentPosition(password) & Node.DOCUMENT_POSITION_FOLLOWING,
+  );
+  return { username: selectBefore[selectBefore.length - 1] ?? selects[0] ?? null, password };
 }
 
 /**
@@ -181,6 +205,28 @@ function setValue(el: HTMLInputElement, value: string): void {
   el.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
+/**
+ * Picks the option carrying `username`, by value first and visible text
+ * second, and reports whether there was one.
+ *
+ * The native-setter trick above does not apply: it exists for React's and
+ * Vue's shadowed `value` on inputs. A select takes `selectedIndex` and the
+ * same two events. Assigning a value no option carries selects nothing and
+ * says nothing, so the match is looked up first and a miss leaves the
+ * dropdown exactly as it was.
+ */
+function selectOption(el: HTMLSelectElement, username: string): boolean {
+  const options = Array.from(el.options);
+  const byValue = options.findIndex((o) => o.value === username);
+  const index = byValue !== -1 ? byValue : options.findIndex((o) => o.text.trim() === username);
+  if (index === -1) return false;
+
+  el.selectedIndex = index;
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+  el.dispatchEvent(new Event("change", { bubbles: true }));
+  return true;
+}
+
 export function fillFields(
   doc: Document,
   credentials: { username: string | null; password: string | null },
@@ -189,8 +235,12 @@ export function fillFields(
 
   let filledUsername = false;
   if (fields.username !== null && credentials.username !== null) {
-    setValue(fields.username, credentials.username);
-    filledUsername = true;
+    if (fields.username instanceof HTMLSelectElement) {
+      filledUsername = selectOption(fields.username, credentials.username);
+    } else {
+      setValue(fields.username, credentials.username);
+      filledUsername = true;
+    }
   }
 
   let filledPassword = false;
