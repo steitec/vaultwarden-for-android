@@ -87,25 +87,28 @@ Not postponed features — these are true of the current build, and each will
 eventually be somebody's bug report. Full write-ups in `docs/DEVELOPMENT.md` →
 "Known gaps in what already ships", except F-1, which is in the verification log.
 
+Every check below that needs the phone is collected, in run order, in
+`docs/DEVICE-CHECKS.md`.
+
 - **Email-first login flows get no badge at step 1** (F-1). web.de, Google,
   Microsoft: the first screen has no password field, so the content script stays
   silent by design — and on the next screen there is usually no username field
   left to fill. The popup path still works. Reads as "the extension does nothing
   on my mail provider", so it wants a decision before a listed submission.
-- **A `<select>` username field is never filled.** Concrete trigger: a FRITZ!Box
-  with FRITZ!Benutzer configured. Produces a filled password beside an untouched
-  dropdown, which looks like partial success. jsdom covers it; no device needed.
+- ~~**A `<select>` username field is never filled.**~~ **Fixed on `main`
+  2026-11-07**, not released yet. A dropdown is taken only when the form has
+  no text input, and a username no option carries leaves it untouched. See
+  `docs/DEVELOPMENT.md` → "A `<select>` username field". Not yet tried against
+  a real FRITZ!Box; that is in `docs/DEVICE-CHECKS.md`.
 - **`http://[::1]` gets no badge.** No fix inside MV2 — a limitation of match
   patterns, recorded so nobody spends an afternoon on it.
-- **A badge tap against a locked vault is lost when the vault is opened with
-  the master password.** `redeemPending()` hangs off `unlock(pin)` alone
-  (`src/background/controller.ts`); `setup()` never calls it. Today that costs
-  a tap only after a PIN lockout. For an account that unlocks without a PIN it
-  costs one after every Firefox restart, which is that mode's ordinary way
-  back in. The fix is one call in `setup()`: `redeemPending` goes through
-  `fill()` unchanged, so the https check, the URL re-match against the tab and
-  the refusal for a passwordless entry all still apply. Found 2026-08-30 while
-  building the PIN-less option, and deliberately left out of that branch.
+- ~~**A badge tap against a locked vault is lost when the vault is opened with
+  the master password.**~~ **Fixed on `main` 2026-11-07**, not released yet:
+  `setup()` now calls `redeemPending()` after a successful sign-in, the same
+  way `unlock(pin)` does, so the tap still goes through `fill()` with every
+  guard it runs. Pinned by `tests/background/setup.test.ts` → "Controller.setup
+  and a pending fill". Found 2026-08-30 while building the PIN-less option.
+  Not yet tried on the device; that is in `docs/DEVICE-CHECKS.md`.
 - **A re-authentication resets the idle timeout and the restart policy.**
   `setup()` rebuilds the record and writes `DEFAULT_LOCK_TIMEOUT_MINUTES` and
   `DEFAULT_REQUIRE_MASTER_PASSWORD_ON_RESTART` over whatever was there. The
