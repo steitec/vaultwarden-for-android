@@ -9,6 +9,7 @@ import {
   SERVER,
   EMAIL,
   PASSWORD,
+  subOf,
 } from "./seed";
 import {
   prelogin,
@@ -25,7 +26,7 @@ import { createCipher, updateCipher, deleteCipher } from "../../src/api/ciphers"
 import { generateTotp } from "../../src/totp";
 import type { SymKey } from "../../src/crypto/encstring";
 import { toBase64, concat, utf8 } from "../../src/crypto/bytes";
-import syncFixture from "../fixtures/sync-1.37.1.json";
+import syncFixture from "../fixtures/sync-1.37.4.json";
 
 const DEVICE = "integration-test";
 
@@ -57,7 +58,7 @@ async function encryptForProbe(text: string, key: SymKey): Promise<string> {
  * ids and ciphertext. Comparing this against the committed fixture is what
  * makes the fast suite's fixture trustworthy — if the server ever starts
  * sending a different shape, this fails here rather than silently making
- * `tests/fixtures/sync-1.37.1.json` a museum piece.
+ * `tests/fixtures/sync-1.37.4.json` a museum piece.
  */
 function shapeSignature(payload: unknown): string {
   const keysOf = (v: unknown): string =>
@@ -135,7 +136,7 @@ describe("live Vaultwarden", () => {
       // Regenerate the committed fixture from this same seeded vault:
       //   VW_UPDATE_FIXTURE=1 npm run test:integration
       if (process.env.VW_UPDATE_FIXTURE === "1") {
-        writeFileSync("tests/fixtures/sync-1.37.1.json", `${JSON.stringify(raw, null, 2)}\n`);
+        writeFileSync("tests/fixtures/sync-1.37.4.json", `${JSON.stringify(raw, null, 2)}\n`);
         const pre = await fetch(`${SERVER}/identity/accounts/prelogin`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -327,7 +328,13 @@ describe("live Vaultwarden", () => {
           "Content-Type": "application/json",
           Authorization: `Bearer ${account.accessToken}`,
         },
-        body: JSON.stringify({ ...raw, name: await encryptForProbe("Renamed", account.userKey) }),
+        body: JSON.stringify({
+          ...raw,
+          name: await encryptForProbe("Renamed", account.userKey),
+          // Required since 1.37.4; sync does not send it back, so a body
+          // built from sync has to add it. createCipher/updateCipher do.
+          encryptedFor: subOf(account.accessToken),
+        }),
       });
       expect(res.status).toBe(200);
 
@@ -382,7 +389,11 @@ describe("live Vaultwarden", () => {
           "Content-Type": "application/json",
           Authorization: `Bearer ${account.accessToken}`,
         },
-        body: JSON.stringify({ ...raw, lastKnownRevisionDate: "2000-01-01T00:00:00.000Z" }),
+        body: JSON.stringify({
+          ...raw,
+          lastKnownRevisionDate: "2000-01-01T00:00:00.000Z",
+          encryptedFor: subOf(account.accessToken),
+        }),
       });
 
       // Not an assertion about which answer is right — a recording of which

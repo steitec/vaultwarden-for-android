@@ -2,7 +2,7 @@ services:
   vaultwarden:
     # Pinned to the reference server's release. Never use :latest here — an
     # unpinned image turns an upstream change into a mysterious local failure.
-    image: vaultwarden/server:1.37.1
+    image: vaultwarden/server:1.37.4
     environment:
       I_REALLY_WANT_VOLATILE_STORAGE: "true"
       SIGNUPS_ALLOWED: "true"
