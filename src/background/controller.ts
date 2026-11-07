@@ -363,6 +363,11 @@ export class Controller {
     }
 
     await this.loadFromCache();
+    // The master password is an unlock too, and for an account without a PIN
+    // it is the ordinary one after every Firefox restart. A badge tap made
+    // against the locked vault is redeemed here exactly as after a PIN:
+    // through fill(), with every guard redeemPending already applies.
+    await this.redeemPending();
     return { ok: true };
   }
 

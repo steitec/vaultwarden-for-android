@@ -637,3 +637,80 @@ describe("Controller.syncNow", () => {
     expect(syncCall.body).not.toContain(PASSWORD);
   }, 45000);
 });
+
+describe("Controller.setup and a pending fill", () => {
+  // A badge tap against a locked vault is recorded and waits for the unlock.
+  // The master password is an unlock too: for an account without a PIN it is
+  // the ordinary way back in after every Firefox restart, and after a PIN
+  // lockout it is the only one. A tap made before it must not be lost.
+  async function lockedSessionAccount(): Promise<Harness> {
+    const a = await account();
+    const userKey: SymKey = { encKey: a.userKeyRaw.slice(0, 32), macKey: a.userKeyRaw.slice(32) };
+    await stubServer({ vault: () => vaultWith("GitHub", userKey) });
+    const h = makeHarness(sessionModeAccount());
+    await h.controller.init();
+    expect(h.controller.status().state).toBe("locked");
+    return h;
+  }
+
+  function stubTabs(url: string) {
+    const get = vi.fn().mockResolvedValue({ id: 7, url });
+    const sendMessage = vi.fn().mockResolvedValue({ filledUsername: true, filledPassword: true });
+    // stubServer has already replaced fetch; this adds browser.tabs beside it.
+    vi.stubGlobal("browser", { tabs: { get, sendMessage } });
+    return { get, sendMessage };
+  }
+
+  it("fills the recorded tab after a master-password sign-in", async () => {
+    const h = await lockedSessionAccount();
+    const { sendMessage } = stubTabs("https://github.com/login");
+    h.controller.recordPending({ tabId: 7, origin: "https://github.com", at: Date.now() });
+
+    await h.controller.setup({ serverUrl: SERVER, email: "a@b.com", password: PASSWORD, pin: "" });
+
+    expect(sendMessage).toHaveBeenCalledWith(7, {
+      kind: "fill",
+      username: "octocat",
+      password: "hunter2",
+    });
+  }, 30000);
+
+  it("consumes the tap, so a second sign-in does not fill again", async () => {
+    const h = await lockedSessionAccount();
+    const { sendMessage } = stubTabs("https://github.com/login");
+    h.controller.recordPending({ tabId: 7, origin: "https://github.com", at: Date.now() });
+
+    await h.controller.setup({ serverUrl: SERVER, email: "a@b.com", password: PASSWORD, pin: "" });
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+
+    h.controller.lock();
+    sendMessage.mockClear();
+    await h.controller.setup({ serverUrl: SERVER, email: "a@b.com", password: PASSWORD, pin: "" });
+
+    expect(sendMessage).not.toHaveBeenCalled();
+  }, 30000);
+
+  it("still applies the origin check, so a navigated tab gets nothing", async () => {
+    // Proof that the sign-in goes through the same redemption as the PIN,
+    // with every guard it runs, rather than a shortcut of its own.
+    const h = await lockedSessionAccount();
+    const { sendMessage } = stubTabs("https://evil.example/login");
+    h.controller.recordPending({ tabId: 7, origin: "https://github.com", at: Date.now() });
+
+    await h.controller.setup({ serverUrl: SERVER, email: "a@b.com", password: PASSWORD, pin: "" });
+
+    expect(sendMessage).not.toHaveBeenCalled();
+  }, 30000);
+
+  it("does not let a redemption failure fail the sign-in itself", async () => {
+    const h = await lockedSessionAccount();
+    const get = vi.fn().mockRejectedValue(new Error("No tab with id 7"));
+    vi.stubGlobal("browser", { tabs: { get, sendMessage: vi.fn() } });
+    h.controller.recordPending({ tabId: 7, origin: "https://github.com", at: Date.now() });
+
+    await expect(
+      h.controller.setup({ serverUrl: SERVER, email: "a@b.com", password: PASSWORD, pin: "" }),
+    ).resolves.toEqual({ ok: true });
+    expect(h.controller.status().state).toBe("unlocked");
+  }, 30000);
+});
