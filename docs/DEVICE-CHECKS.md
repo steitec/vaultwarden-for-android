@@ -18,8 +18,9 @@ and the second factor at hand.
 ## Before you start
 
 - **A new version number.** `0.3.0` is already signed, and AMO never accepts a
-  version twice. Bump `version` in `src/manifest.json` (and `package.json`)
-  first; these changes are a patch, so `0.3.1`.
+  version twice. Done 2026-11-07: `src/manifest.json`, `package.json` and the
+  lock file say `0.3.1`. If a check fails and the fix needs another build,
+  that build is `0.3.2` — a signed number is spent even if it never ships.
 - **Sign and install** as in `docs/PRIVATE-INSTALL.md` → steps 3–7 and
   "Updating later". Installing over the old version keeps the account, the PIN
   and the cache.
