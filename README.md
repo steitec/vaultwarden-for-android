@@ -20,7 +20,7 @@ limitations and troubleshooting — are in the
 
 ## Status
 
-Version 0.3.0. In daily use by its author since 2026-08-29, on release Firefox
+Version 0.3.2. In daily use by its author since 2026-08-29, on release Firefox
 for Android, from a build signed by Mozilla.
 
 **It is not listed on addons.mozilla.org**, so there is no install button.
@@ -29,7 +29,7 @@ use — an unlisted signature, which release Firefox for Android will install fr
 a file. [`docs/PRIVATE-INSTALL.md`](docs/PRIVATE-INSTALL.md) is the step-by-step
 route and has been walked end to end.
 
-Requires Firefox 142 or newer. Tested against Vaultwarden 1.37.1.
+Requires Firefox 142 or newer. Tested against Vaultwarden 1.37.4.
 
 ## What it does
 
