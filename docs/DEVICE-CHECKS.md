@@ -156,7 +156,9 @@ The full checklist has only run on Nightly with a temporary add-on
 Nightly alone; the steps and expected results are in
 `docs/VERIFICATION-2026-08-25.md`, under the same IDs.
 
-- [ ] V1 = C3 — idle lock after 15 minutes without interaction (PIN on)
+- [x] V1 = C3 — idle lock after 15 minutes without interaction (PIN on)
+      2026-11-22, 0.3.2: pass. PIN turned back on, popup closed 13:26,
+      opened 13:43 onto the PIN pad.
 - [x] V2 = D3 — fill on the React login form
       2026-11-22, 0.3.2: pass after a retry. First tap did nothing: a second
       entry for `http://127.0.0.1:8000` was left over from the 2026-08 run,
