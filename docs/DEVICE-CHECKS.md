@@ -177,8 +177,10 @@ Nightly alone; the steps and expected results are in
       2026-11-22, 0.3.2: pass. Counter read 3, 2, 1, 0 beside "Incorrect
       PIN"; then the sign-in form (C5), and the master password brought the
       entries back.
-- [ ] V6 = F1–F2 — sign out asks first, then wipes. **Throws the whole
+- [x] V6 = F1–F2 — sign out asks first, then wipes. **Throws the whole
       account away**; set it up again afterwards. Last on purpose.
+      2026-11-22, 0.3.2: pass. Confirmation came first; after it, the setup
+      form, not the unlock screen.
 
 ## When this is done
 
