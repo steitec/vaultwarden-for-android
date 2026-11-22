@@ -50,7 +50,7 @@ Merged 2026-08-30 and never run on a phone. With the vault open, in the settings
       the PIN is **still off**.
       _Why:_ `setup()` has to keep the mode for the same account. If this is
       wrong the option turns itself off once a day, quietly.
-- [!] P2 Unlock, then leave the phone asleep for well over fifteen minutes
+- [x] P2 Unlock, then leave the phone asleep for well over fifteen minutes
       (half an hour is fine). Wake it and open the popup: the vault is **still
       open**.
       _Why:_ the opposite of C3 in the 2026-08-25 run. Without a PIN no idle
@@ -61,6 +61,13 @@ Merged 2026-08-30 and never run on a phone. With the vault open, in the settings
       2026-11-07: not the add-on — Android killed Firefox while asleep, so
       this was a restart. See **F-6**. Run again after changing the battery
       setting.
+
+      2026-11-22, 0.3.2: pass. Firefox battery set to Unrestricted
+      (`RUN_ANY_IN_BACKGROUND: allow`, on the deviceidle whitelist). Screen
+      off 12:41:46 to 13:12:27, light doze from 12:43, deep idle from 12:58;
+      the Firefox main process kept PID 22116 throughout (started 12:36:37),
+      only content child processes came and went. The popup opened onto an
+      unlocked vault.
 
 - [x] P3 **New 2026-11-07.** Restart Firefox so the vault is locked. Open a
       login page that has exactly one entry, clear both fields, tap the badge.
@@ -182,6 +189,9 @@ To run P2 again: Android Settings → Apps → Firefox → Battery →
 Worth stating in the wiki: without a PIN, every time Android ends Firefox
 costs a master-password sign-in, and "Restricted" makes that much more
 frequent.
+
+Rerun 2026-11-22 with the setting on Unrestricted: P2 passes, the process
+survived half an hour including deep idle.
 
 ### F-7 — Creating an entry fails with 422 on Vaultwarden 1.37.4 (W1)
 
