@@ -9,6 +9,13 @@ Dates are the day the version number was set.
 
 ## [Unreleased]
 
+### Fixed
+- The on-screen keyboard no longer hides fields in the panel for good. Firefox
+  for Android lays it over the panel without resizing it, so in the editor the
+  password field and the save button could not be scrolled into view. While a
+  text field has focus the panel now has room below its content, and the field
+  is scrolled to the middle.
+
 ## [0.3.2] — 2026-11-22
 
 ### Fixed

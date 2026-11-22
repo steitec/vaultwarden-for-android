@@ -9,6 +9,7 @@ import type {
 import type { UnlockMode } from "../session/store";
 import { errorText, PinRejected } from "./errors";
 import { renderEditor, teardownEditor, type EditorModel } from "./editor";
+import { keepFocusedFieldVisible } from "./keyboard";
 import {
   renderSettings,
   renderSetup,
@@ -932,5 +933,14 @@ export async function main(): Promise<void> {
 // the document, so readyState is still "loading" here; in any other host
 // (a test importing the module) it is not.
 if (typeof document !== "undefined" && document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", () => void main(), { once: true });
+  document.addEventListener(
+    "DOMContentLoaded",
+    () => {
+      // Here rather than in main(): it is installed once per document, and
+      // the tests call main() many times on the same one.
+      keepFocusedFieldVisible(document);
+      void main();
+    },
+    { once: true },
+  );
 }
