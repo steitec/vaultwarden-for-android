@@ -128,19 +128,25 @@ Built 2026-09-25 and never run on a phone.
 login page shows a user dropdown instead of a text field. If yours does not,
 mark S1 `[-]`.
 
-- [ ] S1 Make the entry's username **exactly** the name the dropdown shows.
+- [-] S1 Make the entry's username **exactly** the name the dropdown shows.
       Open the login page, tap the badge: the dropdown switches to that user,
       the password is filled, and **Log in works**.
       If it fails: on a computer, save the login page (Save page as → HTML
       only) and keep it. The tests were written from a description, not from
       a real page, and the saved page becomes the test.
-- [ ] S2 Change one letter of the entry's username and fill again. The
+- [-] S2 Change one letter of the entry's username and fill again. The
       dropdown stays **where it was**, the password is filled.
       _Why:_ a username that is not in the list must never be reported as
       filled.
-- [ ] S3 Normal login pages are unaffected: repeat D2 and D6 from the
+
+      2026-11-22: S1 and S2 not applicable, no FRITZ!Benutzer set up.
+- [x] S3 Normal login pages are unaffected: repeat D2 and D6 from the
       2026-08-25 run (popup fill and badge fill on an ordinary
       username/password page).
+
+      2026-11-22, 0.3.2: pass. Badge fill (D6) on
+      `https://the-internet.herokuapp.com/login` during W1, popup fill (D2)
+      on the decoy page during V3.
 
 ## V. Release channel
 
@@ -151,8 +157,14 @@ Nightly alone; the steps and expected results are in
 `docs/VERIFICATION-2026-08-25.md`, under the same IDs.
 
 - [ ] V1 = C3 — idle lock after 15 minutes without interaction (PIN on)
-- [ ] V2 = D3 — fill on the React login form
-- [ ] V3 = D5 — decoy page: visible fields filled, decoys empty
+- [x] V2 = D3 — fill on the React login form
+      2026-11-22, 0.3.2: pass after a retry. First tap did nothing: a second
+      entry for `http://127.0.0.1:8000` was left over from the 2026-08 run,
+      so the badge was a chooser, see **F-9**. With it deleted and a sync,
+      the badge filled, React state FILLED, submitted password 8 chars.
+- [x] V3 = D5 — decoy page: visible fields filled, decoys empty
+      2026-11-22, 0.3.2: pass, filled from the popup. Both visible fields
+      FILLED, both decoys empty.
 - [ ] V4 = E1–E3 — airplane mode, "Sync now", failed-sync banner
 - [ ] V5 = C4 — wrong-PIN counter: 3, 2, 1, 0 remaining, the sixth refused and
       the key dropped. **Throws the PIN away**; C5 (master password restores)
@@ -224,3 +236,16 @@ on Android; whether the page was filled after the sign-in was never
 observed. Two conditions worth knowing when it seems not to work: the tap is
 redeemable for two minutes (`PENDING_TTL_MS` in `src/background/pending.ts`),
 and only when exactly one entry matches the page.
+
+### F-9 — A chooser badge does nothing on Android (V2)
+
+Seen 2026-11-22. Two entries matched `http://127.0.0.1:8000`, so the badge
+was in chooser mode. A tap sends `handOff`, which tries to open the popup;
+`openPopup` is unavailable on Android (as D7a established), so nothing
+visible happens and nothing is filled. From the user's side it is
+indistinguishable from a broken fill.
+
+Working as designed — several matches are a choice only the user can make —
+but the badge promises something it cannot do on this platform. Options for
+the backlog: no badge in chooser mode on Android, or a page-level hint
+("2 entries — open the add-on to choose"). Not a release blocker.
