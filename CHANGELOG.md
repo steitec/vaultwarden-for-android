@@ -9,6 +9,15 @@ Dates are the day the version number was set.
 
 ## [Unreleased]
 
+## [0.3.3] — 2026-11-22
+
+### Fixed
+- The on-screen keyboard no longer hides fields in the panel for good. Firefox
+  for Android lays it over the panel without resizing it, so in the editor the
+  password field and the save button could not be scrolled into view. While a
+  text field has focus the panel now has room below its content, and the field
+  is scrolled to the middle.
+
 ## [0.3.2] — 2026-11-22
 
 ### Fixed
@@ -82,7 +91,8 @@ Dates are the day the version number was set.
   step of an unlock.
 - Matching by registrable domain; offline cache kept as ciphertext.
 
-[Unreleased]: https://github.com/steitec/vaultwarden-for-android/compare/c75835b...HEAD
+[Unreleased]: https://github.com/steitec/vaultwarden-for-android/compare/main...HEAD
+[0.3.3]: https://github.com/steitec/vaultwarden-for-android/pull/21
 [0.3.2]: https://github.com/steitec/vaultwarden-for-android/pull/19
 [0.3.1]: https://github.com/steitec/vaultwarden-for-android/pull/16
 [0.3.0]: https://github.com/steitec/vaultwarden-for-android/commit/3cf6f35

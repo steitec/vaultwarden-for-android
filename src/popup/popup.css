@@ -13,6 +13,13 @@ body {
   font: 16px/1.4 system-ui, sans-serif;
 }
 
+/* While a text field has focus: room below the content, so a field behind the
+   on-screen keyboard can be scrolled above it. Firefox for Android lays the
+   keyboard over the popup without resizing it (src/popup/keyboard.ts). */
+body.typing {
+  padding-bottom: 60vh;
+}
+
 .status {
   display: flex;
   flex-wrap: wrap;

@@ -20,7 +20,7 @@ limitations and troubleshooting — are in the
 
 ## Status
 
-Version 0.3.2. In daily use by its author since 2026-08-29, on release Firefox
+Version 0.3.3. In daily use by its author since 2026-08-29, on release Firefox
 for Android, from a build signed by Mozilla.
 
 **It is not listed on addons.mozilla.org**, so there is no install button.
