@@ -30,6 +30,7 @@ a file. [`docs/PRIVATE-INSTALL.md`](docs/PRIVATE-INSTALL.md) is the step-by-step
 route and has been walked end to end.
 
 Requires Firefox 142 or newer. Tested against Vaultwarden 1.37.4.
+What changed in each version is in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## What it does
 
@@ -63,9 +64,13 @@ tracker because finding them yourself is worse than being told.
   Google, Microsoft — the first screen has no password field, so the content
   script stays silent by design; and the second screen usually has no username
   field left to fill. Opening the add-on and tapping the entry still works.
-- **A `<select>` username is never filled.** A FRITZ!Box with FRITZ!Benutzer
-  configured renders a dropdown instead of a text field. The password is filled,
-  the dropdown is not, and it looks like a partial success.
+- **A `<select>` username is filled only on an exact match.** A FRITZ!Box with
+  FRITZ!Benutzer renders a dropdown instead of a text field. It is set when the
+  entry's username is one of its options and left alone otherwise; not yet
+  tried against a real FRITZ!Box.
+- **With several matching entries the badge does nothing visible.** The choice
+  needs the panel, and Android does not let an add-on open it. Open the add-on
+  from the ⋮ menu and tap the entry.
 - **`http://[::1]` gets no badge.** It is a fillable origin that cannot be
   written as a manifest match pattern. Such pages keep the pop-up path.
 - **TOTP codes are not shown.** Entries that carry a TOTP secret are marked

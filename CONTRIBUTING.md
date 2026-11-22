@@ -53,6 +53,10 @@ attached that is not obvious from the code.
 One change per commit, with a message that says why rather than what. The diff
 already says what.
 
+A change a user would notice goes into `CHANGELOG.md` under **Unreleased**, in
+the same commit. When the version number is set for a signed build, that
+section becomes the version's heading, with the date.
+
 ## Licence
 
 Contributions are made under GPL-3.0-only, the licence this repository ships
