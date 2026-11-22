@@ -96,19 +96,20 @@ Every check below that needs the phone is collected, in run order, in
   left to fill. The popup path still works. Reads as "the extension does nothing
   on my mail provider", so it wants a decision before a listed submission.
 - ~~**A `<select>` username field is never filled.**~~ **Fixed on `main`
-  2026-11-07**, not released yet. A dropdown is taken only when the form has
+  2026-11-07**, in 0.3.2. A dropdown is taken only when the form has
   no text input, and a username no option carries leaves it untouched. See
   `docs/DEVELOPMENT.md` → "A `<select>` username field". Not yet tried against
-  a real FRITZ!Box; that is in `docs/DEVICE-CHECKS.md`.
+  a real FRITZ!Box: S1–S2 were not applicable on 2026-11-22 (no
+  FRITZ!Benutzer set up), so the saved-page test is still owed.
 - **`http://[::1]` gets no badge.** No fix inside MV2 — a limitation of match
   patterns, recorded so nobody spends an afternoon on it.
 - ~~**A badge tap against a locked vault is lost when the vault is opened with
-  the master password.**~~ **Fixed on `main` 2026-11-07**, not released yet:
+  the master password.**~~ **Fixed on `main` 2026-11-07**, in 0.3.2:
   `setup()` now calls `redeemPending()` after a successful sign-in, the same
   way `unlock(pin)` does, so the tap still goes through `fill()` with every
   guard it runs. Pinned by `tests/background/setup.test.ts` → "Controller.setup
   and a pending fill". Found 2026-08-30 while building the PIN-less option.
-  Not yet tried on the device; that is in `docs/DEVICE-CHECKS.md`.
+  Confirmed on the device 2026-11-22 (P3).
 - **A re-authentication resets the idle timeout and the restart policy.**
   `setup()` rebuilds the record and writes `DEFAULT_LOCK_TIMEOUT_MINUTES` and
   `DEFAULT_REQUIRE_MASTER_PASSWORD_ON_RESTART` over whatever was there. The
@@ -116,46 +117,22 @@ Every check below that needs the phone is collected, in run order, in
   not, and nothing tells the user. Invisible today because neither has a
   control in the interface — which is also why fixing it belongs with building
   those controls rather than before them.
-- **The full checklist has never run on the release channel.** The private
-  install was done on 2026-08-29 and smoke-tested there — setup, lock/unlock,
-  badge and fill, all passing on release Firefox 154.0 with the signed build.
-  Everything else is carried by the run of 2026-08-26, which was Nightly with a
-  temporary add-on: the fifteen-minute idle lock, the wrong-PIN counter, the
-  React form, the off-screen decoy, offline cache and sign-out. Nothing suggests
-  the channel changes any of them, which is why this is a gap and not a task.
-  Worth closing before a listed submission, when the release channel is what
-  every reviewer and every user will be on.
-  See `docs/PRIVATE-INSTALL.md` → "Walked for real, 2026-08-29".
-- **PIN-less unlock has never run on a phone.** Merged 2026-08-30 with the
-  unit suite green, and the suite cannot reach either half of what actually
-  matters here. Two checks, both on the device:
-
-  1. Turn the switch on, then restart Firefox. The master-password screen must
-     come up **without a PIN field**, and signing in must leave the account
-     still PIN-less. This is `setup()`'s preserve-the-mode path, and if it is
-     wrong the option turns itself off once a day — quietly, since the form
-     would simply ask for a PIN as it always did.
-  2. Leave the phone asleep well past fifteen minutes with the vault open. It
-     must still be open. The same rig as F-4, with the opposite expectation:
-     there, a frozen process had to wake up locked; here it must wake up
-     unlocked, because no deadline was ever armed.
-
-  Until both are done, the mode is tested only against jsdom and a fake
-  server, which is exactly the gap the overnight run of 2026-08-27/28 existed
-  to close for the idle lock.
-
-- **The editor has never run on a phone.** Built 2026-09-25 with the unit suite
-  and the live-container suite green, and neither can reach what actually
-  matters here. Three checks, all on the device:
-
-  1. Create an entry on the phone, then fill it on a real page.
-  2. Add notes to an entry in the web vault, change that entry in the add-on,
-     then find the notes still there. This is the failure mode the whole
-     design was written around — `PUT /api/ciphers/{id}` is a full replace, so
-     a body built from the wrong thing deletes them silently. The integration
-     suite covers it against the pinned container; the device adds the real
-     account and the real network.
-  3. Delete an entry and find it in the web vault's trash.
+- ~~**The full checklist has never run on the release channel.**~~ **Closed
+  2026-11-22** on 0.3.2, release Firefox 160.0: idle lock, React form, decoy,
+  offline/sync, wrong-PIN counter and sign-out all pass (V1–V6 in
+  `docs/DEVICE-CHECKS.md`).
+- ~~**PIN-less unlock has never run on a phone.**~~ **Closed 2026-11-22**:
+  P1 and P2 pass. P2 needs Firefox's Android battery setting off
+  "Restricted", or Android ends the process and a restart is what gets
+  tested (F-6).
+- ~~**The editor has never run on a phone.**~~ **Closed 2026-11-22**: W1–W3
+  pass on 0.3.2, after F-7 (`encryptedFor`, Vaultwarden 1.37.4) was fixed.
+- **A chooser badge does nothing on Android** (F-9 in
+  `docs/DEVICE-CHECKS.md`). With several matching entries the tap hands off
+  to the popup, which Android cannot open from an extension, so nothing
+  visible happens. Reads as a broken fill. Either no badge in chooser mode
+  on Android, or a hint on the page; wants a decision before a listed
+  submission.
 
 ---
 

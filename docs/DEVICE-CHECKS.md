@@ -21,6 +21,7 @@ and the second factor at hand.
   version twice. Done 2026-11-07: `src/manifest.json`, `package.json` and the
   lock file say `0.3.1`. If a check fails and the fix needs another build,
   that build is `0.3.2` — a signed number is spent even if it never ships.
+  2026-11-22: `0.3.2` built for the F-7 fix (W1–W3). The next one is `0.3.3`.
 - **Sign and install** as in `docs/PRIVATE-INSTALL.md` → steps 3–7 and
   "Updating later". Installing over the old version keeps the account, the PIN
   and the cache.
@@ -49,7 +50,7 @@ Merged 2026-08-30 and never run on a phone. With the vault open, in the settings
       the PIN is **still off**.
       _Why:_ `setup()` has to keep the mode for the same account. If this is
       wrong the option turns itself off once a day, quietly.
-- [!] P2 Unlock, then leave the phone asleep for well over fifteen minutes
+- [x] P2 Unlock, then leave the phone asleep for well over fifteen minutes
       (half an hour is fine). Wake it and open the popup: the vault is **still
       open**.
       _Why:_ the opposite of C3 in the 2026-08-25 run. Without a PIN no idle
@@ -61,7 +62,14 @@ Merged 2026-08-30 and never run on a phone. With the vault open, in the settings
       this was a restart. See **F-6**. Run again after changing the battery
       setting.
 
-- [!] P3 **New 2026-11-07.** Restart Firefox so the vault is locked. Open a
+      2026-11-22, 0.3.2: pass. Firefox battery set to Unrestricted
+      (`RUN_ANY_IN_BACKGROUND: allow`, on the deviceidle whitelist). Screen
+      off 12:41:46 to 13:12:27, light doze from 12:43, deep idle from 12:58;
+      the Firefox main process kept PID 22116 throughout (started 12:36:37),
+      only content child processes came and went. The popup opened onto an
+      unlocked vault.
+
+- [x] P3 **New 2026-11-07.** Restart Firefox so the vault is locked. Open a
       login page that has exactly one entry, clear both fields, tap the badge.
       Then sign in with the master password in the popup. The page is filled
       **without a second tap**.
@@ -75,13 +83,18 @@ Merged 2026-08-30 and never run on a phone. With the vault open, in the settings
       on Android (D7a); what counts is whether the page is filled after the
       sign-in.
 
+      2026-11-22, 0.3.2: pass. Restart, private tab on
+      `https://the-internet.herokuapp.com/login` (one entry), badge tap,
+      master-password sign-in in the popup: both fields filled, no second
+      tap. Closes F-8.
+
 Turn the PIN back on afterwards, unless you want to keep using the mode.
 
 ## W. Writing entries
 
 Built 2026-09-25 and never run on a phone.
 
-- [!] W1 Create an entry in the add-on (name, username, password, URL of a
+- [x] W1 Create an entry in the add-on (name, username, password, URL of a
       real login page). Open that page and fill it from the badge.
       
       -> creation of a new entry is not possible:
@@ -90,14 +103,24 @@ Built 2026-09-25 and never run on a phone.
       2026-11-07: reproduced and fixed, see **F-7**. Needs a new build
       (0.3.2) to run again; W2 would have failed the same way.
 
-- [ ] W2 In the **web vault**, add notes to an entry. In the add-on, change
+      2026-11-22, 0.3.2 signed, release Firefox 160.0: pass. Entry for
+      `https://the-internet.herokuapp.com/login` created without an error,
+      badge fill, and the site's login succeeded.
+
+- [x] W2 In the **web vault**, add notes to an entry. In the add-on, change
       that entry's password. Back in the web vault: the notes are **still
       there**.
       _Why:_ saving replaces the whole entry on the server. Built from the
       wrong data, it would delete the notes without a word. This is the
       failure the editor's design is written around.
-- [ ] W3 Delete an entry in the add-on. It shows up in the web vault's
+
+      2026-11-22, 0.3.2: pass. Notes added to the W1 entry in the web vault,
+      "Sync now", password changed in the add-on: the notes were still there.
+- [x] W3 Delete an entry in the add-on. It shows up in the web vault's
       **trash**, not gone for good.
+
+      2026-11-22, 0.3.2: pass. The W1 entry, deleted in the add-on, was in
+      the web vault's trash.
 
 ## S. Dropdown username (FRITZ!Box)
 
@@ -105,19 +128,25 @@ Built 2026-09-25 and never run on a phone.
 login page shows a user dropdown instead of a text field. If yours does not,
 mark S1 `[-]`.
 
-- [ ] S1 Make the entry's username **exactly** the name the dropdown shows.
+- [-] S1 Make the entry's username **exactly** the name the dropdown shows.
       Open the login page, tap the badge: the dropdown switches to that user,
       the password is filled, and **Log in works**.
       If it fails: on a computer, save the login page (Save page as → HTML
       only) and keep it. The tests were written from a description, not from
       a real page, and the saved page becomes the test.
-- [ ] S2 Change one letter of the entry's username and fill again. The
+- [-] S2 Change one letter of the entry's username and fill again. The
       dropdown stays **where it was**, the password is filled.
       _Why:_ a username that is not in the list must never be reported as
       filled.
-- [ ] S3 Normal login pages are unaffected: repeat D2 and D6 from the
+
+      2026-11-22: S1 and S2 not applicable, no FRITZ!Benutzer set up.
+- [x] S3 Normal login pages are unaffected: repeat D2 and D6 from the
       2026-08-25 run (popup fill and badge fill on an ordinary
       username/password page).
+
+      2026-11-22, 0.3.2: pass. Badge fill (D6) on
+      `https://the-internet.herokuapp.com/login` during W1, popup fill (D2)
+      on the decoy page during V3.
 
 ## V. Release channel
 
@@ -127,15 +156,31 @@ The full checklist has only run on Nightly with a temporary add-on
 Nightly alone; the steps and expected results are in
 `docs/VERIFICATION-2026-08-25.md`, under the same IDs.
 
-- [ ] V1 = C3 — idle lock after 15 minutes without interaction (PIN on)
-- [ ] V2 = D3 — fill on the React login form
-- [ ] V3 = D5 — decoy page: visible fields filled, decoys empty
-- [ ] V4 = E1–E3 — airplane mode, "Sync now", failed-sync banner
-- [ ] V5 = C4 — wrong-PIN counter: 3, 2, 1, 0 remaining, the sixth refused and
+- [x] V1 = C3 — idle lock after 15 minutes without interaction (PIN on)
+      2026-11-22, 0.3.2: pass. PIN turned back on, popup closed 13:26,
+      opened 13:43 onto the PIN pad.
+- [x] V2 = D3 — fill on the React login form
+      2026-11-22, 0.3.2: pass after a retry. First tap did nothing: a second
+      entry for `http://127.0.0.1:8000` was left over from the 2026-08 run,
+      so the badge was a chooser, see **F-9**. With it deleted and a sync,
+      the badge filled, React state FILLED, submitted password 8 chars.
+- [x] V3 = D5 — decoy page: visible fields filled, decoys empty
+      2026-11-22, 0.3.2: pass, filled from the popup. Both visible fields
+      FILLED, both decoys empty.
+- [x] V4 = E1–E3 — airplane mode, "Sync now", failed-sync banner
+      2026-11-22, 0.3.2: pass. Offline: PIN unlock listed the cache, "Sync
+      now" showed the error banner with the list intact. Back online: "Sync
+      now" set "Last synced" to "just now".
+- [x] V5 = C4 — wrong-PIN counter: 3, 2, 1, 0 remaining, the sixth refused and
       the key dropped. **Throws the PIN away**; C5 (master password restores)
       follows from it.
-- [ ] V6 = F1–F2 — sign out asks first, then wipes. **Throws the whole
+      2026-11-22, 0.3.2: pass. Counter read 3, 2, 1, 0 beside "Incorrect
+      PIN"; then the sign-in form (C5), and the master password brought the
+      entries back.
+- [x] V6 = F1–F2 — sign out asks first, then wipes. **Throws the whole
       account away**; set it up again afterwards. Last on purpose.
+      2026-11-22, 0.3.2: pass. Confirmation came first; after it, the setup
+      form, not the unlock screen.
 
 ## When this is done
 
@@ -167,6 +212,9 @@ Worth stating in the wiki: without a PIN, every time Android ends Firefox
 costs a master-password sign-in, and "Restricted" makes that much more
 frequent.
 
+Rerun 2026-11-22 with the setting on Unrestricted: P2 passes, the process
+survived half an hour including deep idle.
+
 ### F-7 — Creating an entry fails with 422 on Vaultwarden 1.37.4 (W1)
 
 Root cause: Vaultwarden 1.37.4 made `encryptedFor` a required field of the
@@ -192,5 +240,22 @@ in use. Bump the pin together with the server.
 
 ### F-8 — Badge tap before a master-password sign-in (P3)
 
-Open: waiting for what happened after the tap. Questions are in the chat of
-2026-11-07; the result goes here.
+Closed 2026-11-22, not a defect: rerun on 0.3.2 passed (see P3). The
+2026-11-07 note recorded only that the tap showed nothing, which is expected
+on Android; whether the page was filled after the sign-in was never
+observed. Two conditions worth knowing when it seems not to work: the tap is
+redeemable for two minutes (`PENDING_TTL_MS` in `src/background/pending.ts`),
+and only when exactly one entry matches the page.
+
+### F-9 — A chooser badge does nothing on Android (V2)
+
+Seen 2026-11-22. Two entries matched `http://127.0.0.1:8000`, so the badge
+was in chooser mode. A tap sends `handOff`, which tries to open the popup;
+`openPopup` is unavailable on Android (as D7a established), so nothing
+visible happens and nothing is filled. From the user's side it is
+indistinguishable from a broken fill.
+
+Working as designed — several matches are a choice only the user can make —
+but the badge promises something it cannot do on this platform. Options for
+the backlog: no badge in chooser mode on Android, or a page-level hint
+("2 entries — open the add-on to choose"). Not a release blocker.
