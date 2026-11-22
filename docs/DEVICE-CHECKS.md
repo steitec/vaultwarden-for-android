@@ -171,9 +171,12 @@ Nightly alone; the steps and expected results are in
       2026-11-22, 0.3.2: pass. Offline: PIN unlock listed the cache, "Sync
       now" showed the error banner with the list intact. Back online: "Sync
       now" set "Last synced" to "just now".
-- [ ] V5 = C4 — wrong-PIN counter: 3, 2, 1, 0 remaining, the sixth refused and
+- [x] V5 = C4 — wrong-PIN counter: 3, 2, 1, 0 remaining, the sixth refused and
       the key dropped. **Throws the PIN away**; C5 (master password restores)
       follows from it.
+      2026-11-22, 0.3.2: pass. Counter read 3, 2, 1, 0 beside "Incorrect
+      PIN"; then the sign-in form (C5), and the master password brought the
+      entries back.
 - [ ] V6 = F1–F2 — sign out asks first, then wipes. **Throws the whole
       account away**; set it up again afterwards. Last on purpose.
 
