@@ -82,7 +82,7 @@ Turn the PIN back on afterwards, unless you want to keep using the mode.
 
 Built 2026-09-25 and never run on a phone.
 
-- [!] W1 Create an entry in the add-on (name, username, password, URL of a
+- [x] W1 Create an entry in the add-on (name, username, password, URL of a
       real login page). Open that page and fill it from the badge.
       
       -> creation of a new entry is not possible:
@@ -91,14 +91,24 @@ Built 2026-09-25 and never run on a phone.
       2026-11-07: reproduced and fixed, see **F-7**. Needs a new build
       (0.3.2) to run again; W2 would have failed the same way.
 
-- [ ] W2 In the **web vault**, add notes to an entry. In the add-on, change
+      2026-11-22, 0.3.2 signed, release Firefox 160.0: pass. Entry for
+      `https://the-internet.herokuapp.com/login` created without an error,
+      badge fill, and the site's login succeeded.
+
+- [x] W2 In the **web vault**, add notes to an entry. In the add-on, change
       that entry's password. Back in the web vault: the notes are **still
       there**.
       _Why:_ saving replaces the whole entry on the server. Built from the
       wrong data, it would delete the notes without a word. This is the
       failure the editor's design is written around.
-- [ ] W3 Delete an entry in the add-on. It shows up in the web vault's
+
+      2026-11-22, 0.3.2: pass. Notes added to the W1 entry in the web vault,
+      "Sync now", password changed in the add-on: the notes were still there.
+- [x] W3 Delete an entry in the add-on. It shows up in the web vault's
       **trash**, not gone for good.
+
+      2026-11-22, 0.3.2: pass. The W1 entry, deleted in the add-on, was in
+      the web vault's trash.
 
 ## S. Dropdown username (FRITZ!Box)
 
