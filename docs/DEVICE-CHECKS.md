@@ -62,7 +62,7 @@ Merged 2026-08-30 and never run on a phone. With the vault open, in the settings
       this was a restart. See **F-6**. Run again after changing the battery
       setting.
 
-- [!] P3 **New 2026-11-07.** Restart Firefox so the vault is locked. Open a
+- [x] P3 **New 2026-11-07.** Restart Firefox so the vault is locked. Open a
       login page that has exactly one entry, clear both fields, tap the badge.
       Then sign in with the master password in the popup. The page is filled
       **without a second tap**.
@@ -75,6 +75,11 @@ Merged 2026-08-30 and never run on a phone. With the vault open, in the settings
       2026-11-07: open, see **F-8**. Nothing visible on the tap is expected
       on Android (D7a); what counts is whether the page is filled after the
       sign-in.
+
+      2026-11-22, 0.3.2: pass. Restart, private tab on
+      `https://the-internet.herokuapp.com/login` (one entry), badge tap,
+      master-password sign-in in the popup: both fields filled, no second
+      tap. Closes F-8.
 
 Turn the PIN back on afterwards, unless you want to keep using the mode.
 
@@ -203,5 +208,9 @@ in use. Bump the pin together with the server.
 
 ### F-8 — Badge tap before a master-password sign-in (P3)
 
-Open: waiting for what happened after the tap. Questions are in the chat of
-2026-11-07; the result goes here.
+Closed 2026-11-22, not a defect: rerun on 0.3.2 passed (see P3). The
+2026-11-07 note recorded only that the tap showed nothing, which is expected
+on Android; whether the page was filled after the sign-in was never
+observed. Two conditions worth knowing when it seems not to work: the tap is
+redeemable for two minutes (`PENDING_TTL_MS` in `src/background/pending.ts`),
+and only when exactly one entry matches the page.
