@@ -167,7 +167,10 @@ Nightly alone; the steps and expected results are in
 - [x] V3 = D5 — decoy page: visible fields filled, decoys empty
       2026-11-22, 0.3.2: pass, filled from the popup. Both visible fields
       FILLED, both decoys empty.
-- [ ] V4 = E1–E3 — airplane mode, "Sync now", failed-sync banner
+- [x] V4 = E1–E3 — airplane mode, "Sync now", failed-sync banner
+      2026-11-22, 0.3.2: pass. Offline: PIN unlock listed the cache, "Sync
+      now" showed the error banner with the list intact. Back online: "Sync
+      now" set "Last synced" to "just now".
 - [ ] V5 = C4 — wrong-PIN counter: 3, 2, 1, 0 remaining, the sixth refused and
       the key dropped. **Throws the PIN away**; C5 (master password restores)
       follows from it.
