@@ -9,6 +9,12 @@ That is what release Firefox requires before it will install anything, and it is
 a separate matter from being *listed* on addons.mozilla.org. An add-on can be
 signed and still be visible to nobody but you.
 
+> **You do not need this to use the add-on.** Since 0.3.4 every release on
+> GitHub carries the XPI this route produces, signed by Mozilla for the
+> maintainer's account. Download it and continue at Step 6. This document is for
+> building and signing your own — to install a change of your own, or to trust
+> only what you built.
+
 ## The three routes, and why this one
 
 | Route | Public? | Works on release Firefox for Android? |

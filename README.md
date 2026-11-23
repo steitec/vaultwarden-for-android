@@ -24,10 +24,14 @@ Version 0.3.4. In daily use by its author since 2026-08-29, on release Firefox
 for Android, from a build signed by Mozilla.
 
 **It is not listed on addons.mozilla.org**, so there is no install button.
-Running it means building it yourself and having Mozilla sign it for your own
-use — an unlisted signature, which release Firefox for Android will install from
-a file. [`docs/PRIVATE-INSTALL.md`](docs/PRIVATE-INSTALL.md) is the step-by-step
-route and has been walked end to end.
+Each [release](https://github.com/steitec/vaultwarden-for-android/releases)
+from 0.3.4 on carries the XPI signed by Mozilla (an unlisted, self-distributed
+signature), with a `SHA256SUMS` file: download it to the phone and install it
+from a file, as described in the wiki under
+[Installing on your phone](https://github.com/steitec/vaultwarden-for-android/wiki/Installing-on-your-phone).
+It does not update itself; watch the releases. To build and sign it yourself
+instead, [`docs/PRIVATE-INSTALL.md`](docs/PRIVATE-INSTALL.md) is the
+step-by-step route and has been walked end to end.
 
 Requires Firefox 142 or newer. Tested against Vaultwarden 1.37.4.
 What changed in each version is in [`CHANGELOG.md`](CHANGELOG.md).
@@ -137,7 +141,7 @@ Node 22.23.4 is what this is developed and built on.
 suite against it and tears it down. It needs Docker. It talks only to the
 container it starts, never to a real vault.
 
-To get it onto a phone, see [`docs/PRIVATE-INSTALL.md`](docs/PRIVATE-INSTALL.md).
+To get your own signed build onto a phone, see [`docs/PRIVATE-INSTALL.md`](docs/PRIVATE-INSTALL.md).
 Development notes, the manual verification checklist and the known gaps in full
 are in [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md).
 
