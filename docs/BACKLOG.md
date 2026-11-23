@@ -127,13 +127,22 @@ Every check below that needs the phone is collected, in run order, in
   tested (F-6).
 - ~~**The editor has never run on a phone.**~~ **Closed 2026-11-22**: W1–W3
   pass on 0.3.2, after F-7 (`encryptedFor`, Vaultwarden 1.37.4) was fixed.
-- **A chooser badge does nothing on Android** (F-9 in
-  `docs/DEVICE-CHECKS.md`). With several matching entries the tap hands off
-  to the popup, which Android cannot open from an extension, so nothing
-  visible happens. Reads as a broken fill. Either no badge in chooser mode
-  on Android, or a hint on the page; wants a decision before a listed
-  submission.
-
+- ~~**A chooser badge does nothing on Android**~~ **Fixed 2026-11-23** in
+  0.3.4: the tap opens a list of the matching entries on the page (F-9 in
+  `docs/DEVICE-CHECKS.md`; X1–X3 there are still to run on the phone). Was:
+  the tap handed off to the popup, which Android cannot open from an
+  extension, so nothing visible happened.
+- **A page's own script can tap the badge** (F-10, found 2026-11-23 while
+  building the entry list). The badge's click listener sits on a host in the
+  page's DOM and does not check `event.isTrusted`, so `host.click()` from a
+  script on a page with exactly one matching entry asks the background page
+  to fill it — without the user's tap that §3 of the 2026-08-25 design calls
+  the mitigation. The fill still only reaches the tab's own origin and every
+  fill-time guard runs, so it hands a page the credentials for that same
+  page; what it defeats is "the user saw where they were going". The rows of
+  the entry list sit in a closed shadow root and cannot be reached this way.
+  Fix: ignore untrusted events in the badge's handler; the tests dispatch
+  synthetic clicks and need a way around that.
 ---
 
 ## 3.1 Licence notice missing from the built bundle

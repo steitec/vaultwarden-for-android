@@ -20,7 +20,7 @@ limitations and troubleshooting — are in the
 
 ## Status
 
-Version 0.3.3. In daily use by its author since 2026-08-29, on release Firefox
+Version 0.3.4. In daily use by its author since 2026-08-29, on release Firefox
 for Android, from a build signed by Mozilla.
 
 **It is not listed on addons.mozilla.org**, so there is no install button.
@@ -68,9 +68,6 @@ tracker because finding them yourself is worse than being told.
   FRITZ!Benutzer renders a dropdown instead of a text field. It is set when the
   entry's username is one of its options and left alone otherwise; not yet
   tried against a real FRITZ!Box.
-- **With several matching entries the badge does nothing visible.** The choice
-  needs the panel, and Android does not let an add-on open it. Open the add-on
-  from the ⋮ menu and tap the entry.
 - **`http://[::1]` gets no badge.** It is a fillable origin that cannot be
   written as a manifest match pattern. Such pages keep the pop-up path.
 - **TOTP codes are not shown.** Entries that carry a TOTP secret are marked

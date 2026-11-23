@@ -49,7 +49,9 @@ has none or the page has no username field — unchanged from today.
 
 **Unlocked, no match.** No badge. The page is untouched.
 
-**Unlocked, several matches.** The badge hands off to the popup (§5.4), which
+**Unlocked, several matches.** *Superseded 2026-11-23 (F-9): the tap now opens
+a list of the matches on the page, see
+`2026-11-23-inline-chooser-design.md`.* The badge hands off to the popup (§5.4), which
 already lists page matches first (`popup.ts:339`). The list survives here because
 nothing can pick between two entries for one domain.
 

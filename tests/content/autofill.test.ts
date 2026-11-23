@@ -45,6 +45,7 @@ stopPageWatch();
 /** Comfortably past the observer's internal debounce. */
 const REFRESH_DEBOUNCE = 400;
 const { BADGE_HOST_ATTR } = await import("../../src/content/badge");
+const { CHOOSER_HOST_ATTR } = await import("../../src/content/chooser");
 
 function setBody(html: string) {
   document.body.innerHTML = html;
@@ -602,22 +603,90 @@ describe("refreshBadge", () => {
     expect(sendMessage).toHaveBeenCalledWith({ kind: "fillFromPage", itemId: "a" });
   });
 
-  it("hands off to the popup when several entries match", async () => {
-    // Nothing on the page can choose between two entries for one domain.
-    setBody(`<input type="password">`);
-    sendMessage.mockResolvedValue({
+  describe("with several matches", () => {
+    // Nothing can choose between two entries for one domain but the user, and
+    // Firefox for Android cannot open the popup for them to do it (F-9). The
+    // choice is offered on the page instead.
+    const SEVERAL = {
       state: "unlocked",
       items: [
-        { id: "a", name: "One" },
-        { id: "b", name: "Two" },
+        { id: "a", name: "One", username: "first", undecryptable: false },
+        { id: "b", name: "Two", username: null, undecryptable: false },
       ],
+    };
+
+    let roots: ShadowRoot[] = [];
+    const NATIVE_ATTACH = HTMLElement.prototype.attachShadow;
+    beforeEach(() => {
+      roots = [];
+      HTMLElement.prototype.attachShadow = function (this: HTMLElement, init: ShadowRootInit) {
+        const root = NATIVE_ATTACH.call(this, init);
+        roots.push(root);
+        return root;
+      };
     });
-    await refreshBadge(document);
-    sendMessage.mockClear();
+    afterEach(() => {
+      HTMLElement.prototype.attachShadow = NATIVE_ATTACH;
+    });
 
-    tapBadge();
+    function chooser(): HTMLElement | null {
+      const el = document.querySelector(`[${CHOOSER_HOST_ATTR}]`);
+      return el instanceof HTMLElement ? el : null;
+    }
 
-    expect(sendMessage).toHaveBeenCalledWith({ kind: "handOff" });
+    function rows(): HTMLElement[] {
+      return [...(roots.at(-1)?.querySelectorAll<HTMLElement>("[role=menuitem]") ?? [])];
+    }
+
+    async function mountSeveral(): Promise<void> {
+      setBody(`<input type="password">`);
+      sendMessage.mockResolvedValue(SEVERAL);
+      await refreshBadge(document);
+      sendMessage.mockClear();
+    }
+
+    it("opens a list of the entries on a tap, and does not hand off", async () => {
+      await mountSeveral();
+
+      tapBadge();
+
+      expect(chooser()).not.toBeNull();
+      expect(rows().map((r) => r.textContent)).toEqual(["Onefirst", "TwoNo username"]);
+      expect(badge()?.getAttribute("aria-expanded")).toBe("true");
+      expect(sendMessage).not.toHaveBeenCalled();
+    });
+
+    it("fills the entry whose row is tapped", async () => {
+      await mountSeveral();
+      tapBadge();
+
+      rows()[1]?.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
+
+      expect(sendMessage).toHaveBeenCalledWith({ kind: "fillFromPage", itemId: "b" });
+      expect(chooser()).toBeNull();
+      expect(badge()?.getAttribute("aria-expanded")).toBe("false");
+    });
+
+    it("closes the list on a second tap on the badge", async () => {
+      await mountSeveral();
+      tapBadge();
+
+      tapBadge();
+
+      expect(chooser()).toBeNull();
+      expect(badge()?.getAttribute("aria-expanded")).toBe("false");
+      expect(sendMessage).not.toHaveBeenCalled();
+    });
+
+    it("closes the list when the badge is refreshed", async () => {
+      await mountSeveral();
+      tapBadge();
+      sendMessage.mockResolvedValue(SEVERAL);
+
+      await refreshBadge(document);
+
+      expect(chooser()).toBeNull();
+    });
   });
 
   it("hands off to the popup when the vault is locked", async () => {
@@ -794,6 +863,30 @@ describe("startObserving", () => {
     await vi.advanceTimersByTimeAsync(REFRESH_DEBOUNCE * 4);
 
     expect(sendMessage.mock.calls.length).toBe(afterFirst);
+  });
+
+  it("does not react to the entry list it opened itself", async () => {
+    // Opening the list appends its host, like mounting the badge does.
+    vi.useFakeTimers();
+    setBody(`<input type="password">`);
+    sendMessage.mockResolvedValue({
+      state: "unlocked",
+      items: [
+        { id: "a", name: "One", username: null, undecryptable: false },
+        { id: "b", name: "Two", username: null, undecryptable: false },
+      ],
+    });
+    await refreshBadge(document);
+    observe();
+    sendMessage.mockClear();
+
+    document
+      .querySelector(`[${BADGE_HOST_ATTR}]`)
+      ?.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
+    await vi.advanceTimersByTimeAsync(REFRESH_DEBOUNCE * 4);
+
+    expect(document.querySelector(`[${CHOOSER_HOST_ATTR}]`)).not.toBeNull();
+    expect(sendMessage).not.toHaveBeenCalled();
   });
 
   it("stops looking once disconnected", async () => {

@@ -44,10 +44,9 @@ const LOCK: Shape[] = [
 /**
  * The vertical ellipsis Android uses for an overflow menu.
  *
- * A chooser tap cannot finish on the page — it hands off to the popup, which
- * `browserAction.openPopup()` cannot raise on Firefox for Android, so nothing
- * visible happens and the user has to open the add-on. That is the one place
- * the badge can mislead, and it is why chooser is not simply the fill lock.
+ * A chooser tap does not fill: it opens the list of matching entries under
+ * the field (chooser.ts), and the fill comes from a tap on a row. The dots say
+ * "there is a menu here", which is why chooser is not simply the fill lock.
  */
 const OVERFLOW_DOTS: Shape[] = [5.4, 8, 10.6].map((cy): Shape => [
   "circle",
@@ -119,7 +118,7 @@ export function buildGlyph(doc: Document, mode: BadgeMode): SVGSVGElement {
 export function mountBadge(
   field: HTMLInputElement,
   mode: BadgeMode,
-  onTap: () => void,
+  onTap: (host: HTMLElement) => void,
 ): () => void {
   const doc = field.ownerDocument;
 
@@ -127,6 +126,11 @@ export function mountBadge(
   host.setAttribute(BADGE_HOST_ATTR, mode);
   host.setAttribute("aria-label", LABEL[mode]);
   host.setAttribute("role", "button");
+  if (mode === "chooser") {
+    // A chooser tap opens the entry list on the page (chooser.ts).
+    host.setAttribute("aria-haspopup", "menu");
+    host.setAttribute("aria-expanded", "false");
+  }
   host.style.cssText =
     `position:absolute;z-index:2147483647;width:${SIZE_PX}px;height:${SIZE_PX}px;` +
     "cursor:pointer;margin:0;padding:0;";
@@ -149,7 +153,7 @@ export function mountBadge(
     event.preventDefault();
     event.stopPropagation();
     event.stopImmediatePropagation();
-    onTap();
+    onTap(host);
   };
   host.addEventListener("click", handler, true);
 

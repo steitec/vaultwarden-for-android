@@ -22,7 +22,8 @@ and the second factor at hand.
   lock file say `0.3.1`. If a check fails and the fix needs another build,
   that build is `0.3.2` — a signed number is spent even if it never ships.
   2026-11-22: `0.3.2` built for the F-7 fix (W1–W3). `0.3.3` the same day for
-  the on-screen keyboard fix. The next one is `0.3.4`.
+  the on-screen keyboard fix. 2026-11-23: `0.3.4` for the F-9 fix (X1–X3).
+  The next one is `0.3.5`.
 - **Sign and install** as in `docs/PRIVATE-INSTALL.md` → steps 3–7 and
   "Updating later". Installing over the old version keeps the account, the PIN
   and the cache.
@@ -183,12 +184,29 @@ Nightly alone; the steps and expected results are in
       2026-11-22, 0.3.2: pass. Confirmation came first; after it, the setup
       form, not the unlock screen.
 
+## X. The entry list for several matches (0.3.4)
+
+**New 2026-11-23**, for the F-9 fix. Needs two entries for the same login
+page, e.g. a second one for `http://127.0.0.1:8000` (the React form from V2).
+Clear both fields first, or use a private tab.
+
+- [ ] X1 Open the page. The badge shows the lock with the three dots. Tap
+      it: a list with both entries opens under the password field, name and
+      username in each row. Tap one: both fields are filled with **that**
+      entry, and the list is gone.
+- [ ] X2 Tap the badge again, then tap somewhere on the page outside the
+      list: the list closes and nothing is filled. Open it again and tap the
+      badge a second time: it closes too.
+- [ ] X3 Tap into the username field so the keyboard comes up, then tap the
+      badge: the whole list is visible (above the field if the keyboard
+      leaves no room below), and a row tap still fills.
 ## When this is done
 
 - Results into this file, findings at the bottom.
 - `docs/BACKLOG.md` § 3: strike the entries this closes ("never run on a
   phone", "never run on the release channel", the two fixed on 2026-11-07).
 - Anything that failed is a bug with a test first, as usual.
+
 
 ## Findings
 
@@ -260,3 +278,9 @@ Working as designed — several matches are a choice only the user can make —
 but the badge promises something it cannot do on this platform. Options for
 the backlog: no badge in chooser mode on Android, or a page-level hint
 ("2 entries — open the add-on to choose"). Not a release blocker.
+
+2026-11-23: fixed in 0.3.4 a third way, chosen over both: the tap opens a
+list of the matching entries on the page, and a row tap fills that entry
+(`src/content/chooser.ts`, design in
+`docs/superpowers/specs/2026-11-23-inline-chooser-design.md`). To be
+confirmed on the phone: X1–X3.

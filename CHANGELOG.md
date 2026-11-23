@@ -9,6 +9,15 @@ Dates are the day the version number was set.
 
 ## [Unreleased]
 
+## [0.3.4] — 2026-11-23
+
+### Changed
+- With several entries matching a page, a tap on the badge opens a list of
+  them under the password field: name and username, one row each. A tap on a
+  row fills that entry; a tap anywhere else, Escape or a second tap on the
+  badge closes the list. Before, the tap tried to open the add-on's panel,
+  which Firefox for Android does not allow, so nothing happened (F-9).
+
 ## [0.3.3] — 2026-11-22
 
 ### Fixed
@@ -91,7 +100,8 @@ Dates are the day the version number was set.
   step of an unlock.
 - Matching by registrable domain; offline cache kept as ciphertext.
 
-[Unreleased]: https://github.com/steitec/vaultwarden-for-android/compare/v0.3.3...HEAD
+[Unreleased]: https://github.com/steitec/vaultwarden-for-android/compare/v0.3.4...HEAD
+[0.3.4]: https://github.com/steitec/vaultwarden-for-android/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/steitec/vaultwarden-for-android/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/steitec/vaultwarden-for-android/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/steitec/vaultwarden-for-android/compare/v0.3.0...v0.3.1
