@@ -139,8 +139,9 @@ async function dispatch(
     case "deleteItem":
       return controller.deleteItem(msg.itemId);
     case "handOff": {
-      // Two badge taps cannot finish on the page: a locked vault, and several
-      // matches. Both land here so there is one mechanism rather than two.
+      // A badge tap that cannot finish on the page: the vault is locked, and
+      // the unlock happens in the popup. (Several matches used to land here
+      // too; since F-9 they are chosen on the page, content/chooser.ts.)
       const tab = await resolveTabFor(sender);
 
       // Only a locked vault leaves something to redeem. Recording a pending

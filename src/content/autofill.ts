@@ -1,5 +1,6 @@
 import { mountBadge, BADGE_HOST_ATTR, type BadgeMode } from "./badge";
-import type { PageMatches } from "../background/messages";
+import { mountChooser, CHOOSER_HOST_ATTR } from "./chooser";
+import type { ItemSummary, PageMatches } from "../background/messages";
 
 const USERNAME_SELECTOR = [
   'input[type="text"]',
@@ -321,14 +322,75 @@ export async function refreshBadge(doc: Document): Promise<void> {
   const mode = modeFor(matches);
   if (mode === null) return;
 
-  // The item id is carried only for the single-match case. Everything else
-  // hands off to the popup, which is where a choice can actually be made.
-  const only = matches.state === "unlocked" && matches.items.length === 1 ? matches.items[0] : undefined;
-  const itemId = only?.id ?? null;
+  if (matches.state === "locked") {
+    // Nothing can be filled before the unlock, and the unlock happens in the
+    // popup: hand off, and the background page records the pending fill.
+    unmountBadge = mountBadge(password, "unlock", () => {
+      void handOff();
+    });
+    return;
+  }
 
-  unmountBadge = mountBadge(password, mode, () => {
-    void onTap(mode, itemId);
+  const [only] = matches.items;
+  if (mode === "fill" && only !== undefined) {
+    unmountBadge = mountBadge(password, "fill", () => {
+      void fillFromPage(only.id);
+    });
+    return;
+  }
+
+  unmountBadge = mountChooserBadge(password, matches.items);
+}
+
+/**
+ * A badge for several matches: a tap opens the list of them on the page, a
+ * second tap closes it, and a row tap fills that entry (F-9). The returned
+ * unmount takes the list down with the badge, so a refresh never leaves a
+ * list behind pointing at entries that may no longer match.
+ */
+function mountChooserBadge(password: HTMLInputElement, items: ItemSummary[]): () => void {
+  let closeList: (() => void) | null = null;
+  let badgeHost: HTMLElement | null = null;
+
+  const setExpanded = (open: boolean): void => {
+    badgeHost?.setAttribute("aria-expanded", String(open));
+  };
+
+  const unmount = mountBadge(password, "chooser", (host) => {
+    badgeHost = host;
+    if (closeList !== null) {
+      closeList();
+      closeList = null;
+      setExpanded(false);
+      return;
+    }
+    closeList = mountChooser(
+      password,
+      items,
+      (itemId) => {
+        void fillFromPage(itemId);
+      },
+      () => {
+        closeList = null;
+        setExpanded(false);
+      },
+    );
+    setExpanded(true);
   });
+
+  return () => {
+    closeList?.();
+    closeList = null;
+    unmount();
+  };
+}
+
+async function fillFromPage(itemId: string): Promise<void> {
+  try {
+    await browser.runtime.sendMessage({ kind: "fillFromPage", itemId });
+  } catch {
+    // A refused fill. The background page owns the user-facing report.
+  }
 }
 
 /**
@@ -343,16 +405,11 @@ function modeFor(matches: PageMatches): BadgeMode | null {
   return matches.items.length === 1 ? "fill" : "chooser";
 }
 
-async function onTap(mode: BadgeMode, itemId: string | null): Promise<void> {
+async function handOff(): Promise<void> {
   try {
-    if (mode === "fill" && itemId !== null) {
-      await browser.runtime.sendMessage({ kind: "fillFromPage", itemId });
-      return;
-    }
     await browser.runtime.sendMessage({ kind: "handOff" });
   } catch {
-    // A refused fill, or a handOff whose handler does not exist yet. Nothing
-    // to do on the page: the background page owns the user-facing report.
+    // A handOff whose handler does not exist yet. Nothing to do on the page.
   }
 }
 
@@ -372,7 +429,10 @@ const REFRESH_DEBOUNCE_MS = 300;
  */
 function isBadgeNode(n: Node): boolean {
   if (!(n instanceof Element)) return false;
-  return n.hasAttribute(BADGE_HOST_ATTR) || n.closest(`[${BADGE_HOST_ATTR}]`) !== null;
+  // The entry list a chooser badge opens is the same kind of node: ours.
+  return [BADGE_HOST_ATTR, CHOOSER_HOST_ATTR].some(
+    (attr) => n.hasAttribute(attr) || n.closest(`[${attr}]`) !== null,
+  );
 }
 
 /** Whether a record describes nothing but the badge appearing or leaving. */
