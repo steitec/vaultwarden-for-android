@@ -731,6 +731,28 @@ offline. Testing `sign:unlisted` against AMO would mean making a real
 submission, so what the suite pins is its shape: the channel, the order of the
 `&&` chain, the source archive, and the absence of credentials.
 
+#### Publishing the signed XPI with a release
+
+Since 0.3.4 (2026-11-23) every GitHub release carries the signed XPI, so that
+using the add-on does not require an AMO account. Unlisted signing is Mozilla's
+self-distribution channel; hosting the file is what it is for. After the device
+checks pass on the signed build:
+
+```bash
+v=0.3.4
+cp web-ext-artifacts/*-$v.xpi vaultwarden-for-android-$v.xpi
+sha256sum vaultwarden-for-android-$v.xpi > SHA256SUMS
+gh release upload v$v vaultwarden-for-android-$v.xpi SHA256SUMS
+```
+
+The file must come from `sign:unlisted` on the tagged commit: `package`
+refuses a dirty tree, so its content is that tag's build plus `META-INF/`
+(AMO also reformats `manifest.json`, without changing it). The release notes
+say so, link `SECURITY.md`, and say that it does not update itself: there is
+deliberately no `update_url`, which would rule out the listed channel (see
+`docs/PRIVATE-INSTALL.md` → "Going public later"). Builds before 0.3.4 are not
+attached; they have known defects.
+
 ## Known gaps in what already ships
 
 Not features that were postponed — these are true of the current build. Each
