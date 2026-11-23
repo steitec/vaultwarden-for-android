@@ -129,7 +129,7 @@ Every check below that needs the phone is collected, in run order, in
   pass on 0.3.2, after F-7 (`encryptedFor`, Vaultwarden 1.37.4) was fixed.
 - ~~**A chooser badge does nothing on Android**~~ **Fixed 2026-11-23** in
   0.3.4: the tap opens a list of the matching entries on the page (F-9 in
-  `docs/DEVICE-CHECKS.md`; X1–X3 there are still to run on the phone). Was:
+  `docs/DEVICE-CHECKS.md`; X1–X4 passed on the phone the same day). Was:
   the tap handed off to the popup, which Android cannot open from an
   extension, so nothing visible happened.
 - ~~**A page's own script can tap the badge**~~ **Fixed 2026-11-23** in
@@ -137,7 +137,7 @@ Every check below that needs the phone is collected, in run order, in
   with `isTrusted` (`src/content/gesture.ts`). Was: `host.click()` from a page
   script, with exactly one matching entry, asked the background page to fill
   it without the user's tap. Checked in headless Firefox: script clicks fill
-  nothing, real clicks still fill.
+  nothing, real clicks still fill; on the phone, X4 (2026-11-23).
 ---
 
 ## 3.1 Licence notice missing from the built bundle

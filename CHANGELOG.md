@@ -23,6 +23,12 @@ Dates are the day the version number was set.
   the user. Before, a script on the page could click the badge itself and, with
   exactly one matching entry, have it filled without a tap (F-10).
 
+### Verified
+- On release Firefox 161.0 with the signed build: the list opens, fills the
+  tapped entry, closes on a tap elsewhere, stays visible with the keyboard up,
+  and a real tap on a single-match badge still fills (X1–X4 in
+  `docs/DEVICE-CHECKS.md`).
+
 ## [0.3.3] — 2026-11-22
 
 ### Fixed
