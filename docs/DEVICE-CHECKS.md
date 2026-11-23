@@ -22,7 +22,7 @@ and the second factor at hand.
   lock file say `0.3.1`. If a check fails and the fix needs another build,
   that build is `0.3.2` — a signed number is spent even if it never ships.
   2026-11-22: `0.3.2` built for the F-7 fix (W1–W3). `0.3.3` the same day for
-  the on-screen keyboard fix. 2026-11-23: `0.3.4` for the F-9 fix (X1–X3).
+  the on-screen keyboard fix. 2026-11-23: `0.3.4` for the F-9 and F-10 fixes (X1–X4).
   The next one is `0.3.5`.
 - **Sign and install** as in `docs/PRIVATE-INSTALL.md` → steps 3–7 and
   "Updating later". Installing over the old version keeps the account, the PIN
@@ -200,6 +200,10 @@ Clear both fields first, or use a private tab.
 - [ ] X3 Tap into the username field so the keyboard comes up, then tap the
       badge: the whole list is visible (above the field if the keyboard
       leaves no room below), and a row tap still fills.
+- [ ] X4 **F-10.** Delete the second entry again and sync, so exactly one
+      matches. Tap the lock badge: the page is filled, as before. (0.3.4
+      ignores taps a page script makes up; a real tap must still count on
+      Android.)
 ## When this is done
 
 - Results into this file, findings at the bottom.

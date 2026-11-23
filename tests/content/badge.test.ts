@@ -1,6 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { mountBadge, buildGlyph, BADGE_HOST_ATTR } from "../../src/content/badge";
 
+// jsdom cannot produce a trusted event: every click a test dispatches has
+// `isTrusted === false`, exactly like one a page script makes up. The check
+// is therefore swapped for a flag here. tests/content/gesture.test.ts runs
+// the real one.
+const gesture = vi.hoisted(() => ({ trusted: true }));
+vi.mock("../../src/content/gesture", () => ({ isUserGesture: () => gesture.trusted }));
+
 function passwordField(): HTMLInputElement {
   document.body.innerHTML = `<input type="password" id="pw">`;
   const el = document.getElementById("pw");
@@ -152,6 +159,21 @@ describe("mountBadge", () => {
     } finally {
       document.removeEventListener("click", pageSaw);
     }
+  });
+
+  it("ignores a tap the page's own script made up (F-10)", () => {
+    // The host sits in the page's DOM, so a page can dispatch a click on it.
+    // With exactly one match that click would fill without the user's tap
+    // that design §3 calls the mitigation.
+    const onTap = vi.fn();
+    mountBadge(passwordField(), "fill", onTap);
+    gesture.trusted = false;
+    try {
+      tapBadge();
+    } finally {
+      gesture.trusted = true;
+    }
+    expect(onTap).not.toHaveBeenCalled();
   });
 
   it("hides its internals from the page", () => {
