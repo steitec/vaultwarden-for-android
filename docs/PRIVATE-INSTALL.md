@@ -110,6 +110,11 @@ already seen, in either channel. So confirm these in `src/manifest.json` first.
   `browser_specific_settings.gecko.id` is `vaultwarden-android@steitec.net`.
   Self-distribution requires one, and this ID is what ties every future update to
   the same installed add-on. Do not change it once something is installed.
+  **Signing from an AMO account other than the maintainer's?** That ID is
+  registered to the maintainer's account, and AMO refuses it from any other.
+  Use an ID of your own (`vaultwarden-android@your-domain.example`) and keep
+  it. Your build is then a separate add-on from the one attached to the
+  releases, with its own sign-in and storage.
 - **`version` is one you have not signed before.** It is `0.1.0` on a fresh tree.
   Version numbers are unique across *both* AMO channels, so a number spent on a
   private unlisted build can never be reused for a public listed one. Stay in
