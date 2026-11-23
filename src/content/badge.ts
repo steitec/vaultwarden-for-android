@@ -7,6 +7,8 @@
  * — see the 2026-08-25 design's §9.
  */
 
+import { isUserGesture } from "./gesture";
+
 export const BADGE_HOST_ATTR = "data-vw-badge";
 
 export type BadgeMode = "fill" | "chooser" | "unlock";
@@ -153,6 +155,8 @@ export function mountBadge(
     event.preventDefault();
     event.stopPropagation();
     event.stopImmediatePropagation();
+    // Swallowed either way, but only the user's own tap counts (F-10).
+    if (!isUserGesture(event)) return;
     onTap(host);
   };
   host.addEventListener("click", handler, true);

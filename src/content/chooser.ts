@@ -16,6 +16,7 @@
  */
 
 import { BADGE_HOST_ATTR } from "./badge";
+import { isUserGesture } from "./gesture";
 
 export const CHOOSER_HOST_ATTR = "data-vw-chooser";
 
@@ -166,8 +167,13 @@ function buildRow(doc: Document, entry: ChooserEntry, pick: () => void): HTMLEle
     row.setAttribute("aria-disabled", "true");
   } else {
     row.tabIndex = 0;
-    row.addEventListener("click", pick);
+    // The rows sit in a closed shadow root the page cannot reach, so this is
+    // belt and braces: only the user's own tap or key picks (F-10).
+    row.addEventListener("click", (event) => {
+      if (isUserGesture(event)) pick();
+    });
     row.addEventListener("keydown", (event) => {
+      if (!isUserGesture(event)) return;
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
         pick();

@@ -2,6 +2,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mountChooser, CHOOSER_HOST_ATTR, ROW_PX } from "../../src/content/chooser";
 import { BADGE_HOST_ATTR } from "../../src/content/badge";
 
+// jsdom cannot produce a trusted event: every click a test dispatches has
+// `isTrusted === false`, exactly like one a page script makes up. The check
+// is therefore swapped for a flag here. tests/content/gesture.test.ts runs
+// the real one.
+const gesture = vi.hoisted(() => ({ trusted: true }));
+vi.mock("../../src/content/gesture", () => ({ isUserGesture: () => gesture.trusted }));
+
 type Entry = { id: string; name: string; username: string | null; undecryptable: boolean };
 
 const TWO: Entry[] = [
@@ -120,6 +127,24 @@ describe("mountChooser", () => {
 
     expect(pageSaw).not.toHaveBeenCalled();
     document.body.removeEventListener("click", pageSaw);
+  });
+
+  it("ignores a row tap that was not the user's (F-10)", () => {
+    const onPick = vi.fn();
+    mountChooser(field(), TWO, onPick, vi.fn());
+    const first = rows()[0];
+    if (first === undefined) throw new Error("no first row");
+
+    gesture.trusted = false;
+    try {
+      tap(first);
+      first.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    } finally {
+      gesture.trusted = true;
+    }
+
+    expect(onPick).not.toHaveBeenCalled();
+    expect(host()).not.toBeNull();
   });
 
   it("shows an undecryptable entry disabled, and a tap on it does nothing", () => {

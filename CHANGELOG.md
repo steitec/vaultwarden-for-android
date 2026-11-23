@@ -18,6 +18,11 @@ Dates are the day the version number was set.
   badge closes the list. Before, the tap tried to open the add-on's panel,
   which Firefox for Android does not allow, so nothing happened (F-9).
 
+### Security
+- A click on the badge or on a row of the list counts only when it comes from
+  the user. Before, a script on the page could click the badge itself and, with
+  exactly one matching entry, have it filled without a tap (F-10).
+
 ## [0.3.3] — 2026-11-22
 
 ### Fixed

@@ -21,6 +21,11 @@ let registeredListener:
 // Each test sets what that answers.
 const sendMessage = vi.fn();
 
+// Every badge tap below is dispatched by the test, so none is trusted; the
+// check is stubbed to accept them. tests/content/gesture.test.ts and the
+// badge's own tests cover what it refuses.
+vi.mock("../../src/content/gesture", () => ({ isUserGesture: () => true }));
+
 vi.stubGlobal("browser", {
   runtime: {
     id: THIS_EXTENSION_ID,
