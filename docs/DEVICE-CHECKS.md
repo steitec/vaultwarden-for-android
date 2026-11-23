@@ -190,20 +190,27 @@ Nightly alone; the steps and expected results are in
 page, e.g. a second one for `http://127.0.0.1:8000` (the React form from V2).
 Clear both fields first, or use a private tab.
 
-- [ ] X1 Open the page. The badge shows the lock with the three dots. Tap
+- [x] X1 Open the page. The badge shows the lock with the three dots. Tap
       it: a list with both entries opens under the password field, name and
       username in each row. Tap one: both fields are filled with **that**
       entry, and the list is gone.
-- [ ] X2 Tap the badge again, then tap somewhere on the page outside the
+      2026-11-23, 0.3.4 signed, release Firefox 161.0: pass. React
+      login page on `http://127.0.0.1:8000` with two entries.
+- [x] X2 Tap the badge again, then tap somewhere on the page outside the
       list: the list closes and nothing is filled. Open it again and tap the
       badge a second time: it closes too.
-- [ ] X3 Tap into the username field so the keyboard comes up, then tap the
+      2026-11-23, 0.3.4: pass.
+- [x] X3 Tap into the username field so the keyboard comes up, then tap the
       badge: the whole list is visible (above the field if the keyboard
       leaves no room below), and a row tap still fills.
-- [ ] X4 **F-10.** Delete the second entry again and sync, so exactly one
+      2026-11-23, 0.3.4: pass.
+- [x] X4 **F-10.** Delete the second entry again and sync, so exactly one
       matches. Tap the lock badge: the page is filled, as before. (0.3.4
       ignores taps a page script makes up; a real tap must still count on
       Android.)
+      2026-11-23, 0.3.4: pass. Second entry deleted, synced; a real tap on
+      the lock badge filled.
+
 ## When this is done
 
 - Results into this file, findings at the bottom.
@@ -287,4 +294,5 @@ the backlog: no badge in chooser mode on Android, or a page-level hint
 list of the matching entries on the page, and a row tap fills that entry
 (`src/content/chooser.ts`, design in
 `docs/superpowers/specs/2026-11-23-inline-chooser-design.md`). To be
-confirmed on the phone: X1–X3.
+confirmed on the phone: X1–X3. Confirmed 2026-11-23 on the signed 0.3.4,
+release Firefox 161.0: X1–X4 pass. Closed.
