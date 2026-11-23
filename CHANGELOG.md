@@ -91,10 +91,10 @@ Dates are the day the version number was set.
   step of an unlock.
 - Matching by registrable domain; offline cache kept as ciphertext.
 
-[Unreleased]: https://github.com/steitec/vaultwarden-for-android/compare/main...HEAD
-[0.3.3]: https://github.com/steitec/vaultwarden-for-android/pull/21
-[0.3.2]: https://github.com/steitec/vaultwarden-for-android/pull/19
-[0.3.1]: https://github.com/steitec/vaultwarden-for-android/pull/16
-[0.3.0]: https://github.com/steitec/vaultwarden-for-android/commit/3cf6f35
-[0.2.0]: https://github.com/steitec/vaultwarden-for-android/commit/c87db36
-[0.1.0]: https://github.com/steitec/vaultwarden-for-android/commit/0b5390f
+[Unreleased]: https://github.com/steitec/vaultwarden-for-android/compare/v0.3.3...HEAD
+[0.3.3]: https://github.com/steitec/vaultwarden-for-android/compare/v0.3.2...v0.3.3
+[0.3.2]: https://github.com/steitec/vaultwarden-for-android/compare/v0.3.1...v0.3.2
+[0.3.1]: https://github.com/steitec/vaultwarden-for-android/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/steitec/vaultwarden-for-android/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/steitec/vaultwarden-for-android/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/steitec/vaultwarden-for-android/releases/tag/v0.1.0
