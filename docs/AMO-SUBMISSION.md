@@ -146,7 +146,9 @@ Include this text:
 
 > This extension is a client for self-hosted Vaultwarden servers (a
 > Bitwarden-compatible API implementation). It reads an existing vault, unlocks
-> it locally, and fills login forms. It cannot create or edit vault items.
+> it locally, and fills login forms. It can also create, edit and move to the
+> trash the user's own login entries; entries that belong to an organization
+> are read-only (see **Writing** below).
 >
 > **Permissions**
 >
@@ -159,9 +161,11 @@ Include this text:
 > ciphertext. Alongside those, seven non-secret fields: a device id generated
 > locally with `crypto.randomUUID()` and sent to the user's own server at login
 > as Bitwarden's protocol requires, the server's own KDF parameters, the failed
-> PIN counter, the time of the last sync, and the three settings (idle timeout,
+> PIN counter, the time of the last sync, and three settings: the idle timeout,
 > whether a restart demands the master password, and whether the account
-> unlocks with a PIN or once per browser session). Nothing is stored in
+> unlocks with a PIN or once per browser session. Only the last is offered in
+> the interface today; the other two are written at setup with their defaults
+> (15 minutes, no). Nothing is stored in
 > plaintext that the server did not already send in plaintext.
 >
 > **Page access.** The manifest requests `https://*/*`, `http://localhost/*`
@@ -177,12 +181,22 @@ Include this text:
 > **The content script holds no credentials.** `autofill.js` runs at
 > `document_idle`, looks for a visible password field, and — only if it finds
 > one — asks the background page whether anything matches. The answer it
-> receives is a list of entry ids and display names with no password field in
-> it; the type that crosses that boundary (`ItemSummary`) has never had one. It
-> then draws a small badge in a closed shadow root. It learns a credential only
-> when the user taps that badge, and only as a message addressed to its own tab.
-> A page with no login form produces no message at all, so ordinary browsing is
-> never reported to the background page.
+> receives is the list of matching entries as `ItemSummary` values: id, name,
+> username, and three flags (has a TOTP secret, failed to decrypt, editable).
+> There is no password field on that type and there never has been. It then
+> draws a small badge in a closed shadow root. When several entries match, a
+> tap on the badge opens a list of their names and usernames, also in a closed
+> shadow root, so the page's own scripts cannot read them out; a tap on a row
+> fills that entry. It learns a credential only after such a tap, and only as a
+> message addressed to its own tab. A page with no login form produces no
+> message at all, so ordinary browsing is never reported to the background
+> page.
+>
+> **Only a real tap counts.** The badge and the list act on an event only when
+> `event.isTrusted` is true (`src/content/gesture.ts`). Their host elements live
+> in the page's DOM, so a page script could otherwise call `host.click()` and
+> trigger a fill without the user; Firefox sets `isTrusted` only for events it
+> generated from real input, and a page cannot forge it.
 >
 > **Every fill is validated in the background page, not on the page.** The
 > destination URL is read from the tab itself rather than taken from the
@@ -224,7 +238,10 @@ Include this text:
 > the locally PIN-wrapped key, and RSA-OAEP for unwrapping organization keys.
 > RSA-OAEP is used with SHA-1 because that is what the Bitwarden key format
 > specifies for `protectedPrivateKey`; it is interoperability with an existing
-> server format, not a chosen parameter.
+> server format, not a chosen parameter. The background page also contains a
+> TOTP generator (RFC 6238, HMAC-SHA1/256/512 over WebCrypto, SHA-1 being the
+> RFC's default); the popup does not display codes yet, so it is not reachable
+> from the interface in this version.
 >
 > The **only** third-party runtime dependency is `hash-wasm`, used solely for
 > Argon2id, which WebCrypto does not provide. It is needed in two places: for
@@ -233,26 +250,55 @@ Include this text:
 > user's PIN. Everything else in `package.json` is a build or test dependency
 > and is not shipped.
 >
-> **Locking.** The vault auto-locks after 15 minutes of inactivity, and locking
-> zeroes the key buffers rather than only dropping the references. A locked vault
-> cannot reach the server at all: the refresh token is itself encrypted under the
-> user key. Unlocking again uses a PIN of six or more characters. Five wrong
-> PINs are allowed; the sixth submission is refused without being tried and
-> drops the PIN-wrapped key, after which only the master password can open the
-> vault. Each attempt is recorded before it is tried, so killing the browser
-> mid-guess costs an attempt rather than granting a free one. Signing out
-> removes every persisted secret from `browser.storage.local`.
+> **Locking.** Locking zeroes the key buffers rather than only dropping the
+> references, and a locked vault cannot reach the server at all: the refresh
+> token is itself encrypted under the user key. Signing out removes every
+> persisted secret from `browser.storage.local`. There are two unlock modes.
+>
+> - *With a PIN* (the default): the vault locks after 15 minutes of
+>   inactivity. The deadline is checked on every vault access, not only by a
+>   timer, because Android suspends timers while the device sleeps. Unlocking
+>   again uses a PIN of six or more characters. Five wrong PINs are allowed;
+>   the sixth submission is refused without being tried and drops the
+>   PIN-wrapped key, after which only the master password can open the vault.
+>   Each attempt is recorded before it is tried, so killing the browser
+>   mid-guess costs an attempt rather than granting a free one.
+> - *Without a PIN* (opt-in, in the settings): no PIN-wrapped key exists on
+>   disk at all, and there is no idle lock. The master password unlocks the
+>   vault once per Firefox start, and it stays unlocked until the user taps
+>   Lock or Firefox restarts. The user key is held in memory only, as in the
+>   other mode, so an extracted storage image is still protected by the master
+>   password alone.
+>
+> **Writing.** Creating, editing and trashing an entry happen in the background
+> page. The entry is encrypted there before anything is sent: a new entry under
+> the user key, an edited one under its own item key when it has one. An edit
+> is built from the encrypted cipher exactly as the server last sent it, so
+> fields this client does not model survive the full-replace PUT. The
+> controller itself refuses writes to organization entries and to entries that
+> failed to decrypt; the popup hiding the button is not the guard. A write is
+> retried only after a 401, the one answer that proves it was not applied, so
+> a lost response cannot create a duplicate. Every successful write is
+> followed by a full sync. The trash is the server's own: the web vault can
+> restore an entry from it.
 >
 > **Data flow.** Decryption happens only in the background page. The popup
-> receives an item's id, name, username, whether it has a TOTP secret, and
-> whether it failed to decrypt — there is no password field on the type that
-> crosses that boundary. Passwords reach a web page only through the injected
-> fill script, in a message addressed to a single tab.
+> receives an item's id, name, username, whether it has a TOTP secret, whether
+> it failed to decrypt and whether it may be edited — there is no password
+> field on the type that crosses that boundary. The editor additionally
+> receives the entry's first URI, how many others it has, and a single bit
+> saying whether it has a password; still not the password itself. In the
+> other direction, the popup sends a password to the background page only when
+> the user saves an entry: one they typed, or one the popup's generator
+> produced with `crypto.getRandomValues`. Passwords reach a web page only
+> through the content script declared in the manifest, in a message addressed
+> to a single tab.
 >
 > **No analytics, no telemetry, no third-party network requests, no remote
-> code.** There are exactly three `fetch` call sites in the source
-> (`src/api/identity.ts` × 2, `src/api/sync.ts` × 1) and all three target the
-> server URL the user entered. No host is hard-coded anywhere. This is declared
-> in the manifest as `data_collection_permissions: { "required": ["none"] }`,
-> and it is checkable from the source: the three call sites above are the whole
-> of the extension's network surface.
+> code.** There are exactly four `fetch` call sites in the source
+> (`src/api/identity.ts` × 2, `src/api/sync.ts` × 1, `src/api/ciphers.ts` × 1)
+> and all four target the server URL the user entered. No host is hard-coded
+> anywhere. This is declared in the manifest as
+> `data_collection_permissions: { "required": ["none"] }`, and it is checkable
+> from the source: the four call sites above are the whole of the extension's
+> network surface.

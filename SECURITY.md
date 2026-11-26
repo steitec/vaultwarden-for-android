@@ -43,8 +43,8 @@ could not close.
   is refused rather than tried, the PIN-wrapped key is discarded, and the master
   password becomes the only way back in. The attempt is charged and persisted
   *before* it is tried, so killing the browser mid-guess does not buy a free one.
-- **One server, no third parties.** Three `fetch` call sites exist in the whole
-  source and all three go to the server URL you entered. No host is hard-coded.
+- **One server, no third parties.** Four `fetch` call sites exist in the whole
+  source and all four go to the server URL you entered. No host is hard-coded.
   No analytics, no telemetry, no remote code.
 - **The content script holds no credentials.** It runs on every page it is
   allowed on, looks for a visible password field, and only then asks the

@@ -832,3 +832,42 @@ All-sites host access is ordinary for a password manager, and both Bitwarden
 and 1Password match all URLs in their content scripts, but it is the kind of
 thing a reviewer asks about. **The note's own rule stands: re-read it against
 the code before each submission.** It was accurate when written too.
+
+### The AMO reviewer note, reviewed again 2026-11-26
+
+Read against `main` at 0.3.4, ahead of a listed submission. Three releases had
+landed since the last pass — PIN-less unlock (0.2.0), the write path (0.3.0)
+and the on-page chooser with the trusted-tap check (0.3.4) — and none of them
+had touched the note. Every security-bearing claim that was there still held;
+what drifted was what the add-on *does*.
+
+False, and fixed:
+
+- **"It cannot create or edit vault items."** It has since 0.3.0. The note now
+  has a **Writing** paragraph: encryption in the background page, the item key
+  on edits, organization entries refused by the controller, the 401-only
+  retry, and a full sync after every write.
+- **"Exactly three `fetch` call sites."** Four: `src/api/ciphers.ts` is the
+  fourth. It still targets only the configured server, so the claim's point
+  survives and only its count was wrong — which is precisely the kind of
+  sentence a reviewer checks with grep.
+- **"Locking" stated one mode as the only one.** A fixed 15-minute lock and a
+  PIN, while the storage paragraph two screens up already described the
+  PIN-less mode, which has neither. The paragraph now describes both modes.
+- **The content script's answer was understated.** "Ids and display names";
+  the type is `ItemSummary`, which carries usernames too, and since F-9 those
+  names and usernames are drawn onto the page in the chooser list.
+- **"Data flow" covered one direction only.** The popup still never receives
+  a password, but it now sends one, on save. And it called the content
+  script "injected"; it is declared in the manifest and never injected.
+
+Added, because a reviewer will ask about the posture they defend: the
+`isTrusted` check on badge and list taps (F-10), the generator's randomness
+source, and the TOTP code in the background page, which uses HMAC-SHA1 and is
+not reachable from the interface yet. The storage paragraph now says that only
+the unlock mode is a setting the interface offers.
+
+The pattern is the same as last time: the note is a second description of the
+code, and nothing fails when the two diverge. Three feature merges went by
+without anyone re-reading it, so **check it as part of any release that
+changes what the add-on can do**, not only before a submission.
