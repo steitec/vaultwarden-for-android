@@ -67,6 +67,9 @@ software this client talks to.
 
 ## Listing settings
 
+The texts for the listing page itself (name, summary, description, category,
+screenshots) are in `docs/AMO-LISTING.md`.
+
 Submit at https://addons.mozilla.org/developers/ as a **listed** add-on, and
 leave it visible. That is what this document is for, and it is a public act: a
 listing page, a search entry, human review, and a version number that cannot be
