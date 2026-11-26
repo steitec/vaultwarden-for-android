@@ -88,6 +88,11 @@ Android at all. Both halves were wrong, and in opposite directions — invisible
 is *not* installable, and unlisted *is*, from a local file, on release Firefox
 122 and newer.
 
+The privacy policy is `docs/PRIVACY.md`. Paste it into the listing's
+*Privacy Policy* field, and keep the two in step: like the reviewer note below,
+it makes claims a reader can check against the source, and it changes when the
+add-on starts sending or storing anything new.
+
 Confirm the finished listing shows Android compatibility. If it does not, the
 `browser_specific_settings.gecko_android` key in `src/manifest.json` is missing
 or malformed. That exact defect is what makes the official Bitwarden extension
