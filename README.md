@@ -106,7 +106,7 @@ reporting route.
 - Five wrong PINs exhaust the PIN: the next attempt is refused rather than
   tried, the PIN-wrapped key is discarded, and the master password becomes the
   only way back in.
-- Three `fetch` call sites exist in the whole source, all to the server URL you
+- Four `fetch` call sites exist in the whole source, all to the server URL you
   entered. No analytics, no telemetry, no third-party requests, no remote code.
   The manifest declares `data_collection_permissions: { "required": ["none"] }`.
 
