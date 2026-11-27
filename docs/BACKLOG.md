@@ -95,6 +95,25 @@ Every check below that needs the phone is collected, in run order, in
   without a password field gets the badge, and a tap fills the username only
   (design `docs/superpowers/specs/2026-11-26-identifier-first-login-design.md`).
   Unmarked fields are still never guessed at.
+- **A username-only tap while locked can come to nothing after the unlock.**
+  `redeemPending()` fills only when exactly one entry matches the tab, and it
+  counts every match, including entries without a username. With two matches
+  of which only one has a username, the badge on the email screen offered one
+  entry, but the redemption sees two and fills nothing. The user then picks in
+  the panel, as with any ambiguous tap. Fix when it bites: for a
+  `scope: "username"` pending fill, count only entries with a username, the
+  same filter the content script applies. Found in the 0.4.0 review
+  (2026-11-27).
+- **A screen change made only by attributes or styles does not refresh the
+  badge.** `startObserving()` watches `childList` only. A login that swaps the
+  email screen for the password screen by toggling `hidden`, a class or a
+  style on fields already in the DOM, without adding or removing nodes, keeps
+  the old badge (or none) until something else mutates the tree. True for
+  password fields before 0.4.0 as well. Not seen so far: Microsoft's work
+  login (I2) passed on the phone. Fix when a site shows it: also observe
+  `attributes` with an `attributeFilter` (`hidden`, `class`, `style`,
+  `disabled`, `type`), still debounced and still ignoring the badge's own
+  host. Found in the 0.4.0 review (2026-11-27).
 - ~~**A `<select>` username field is never filled.**~~ **Fixed on `main`
   2026-11-07**, in 0.3.2. A dropdown is taken only when the form has
   no text input, and a username no option carries leaves it untouched. See
