@@ -239,22 +239,28 @@ checked on the phone with the signed build (section I below).
 site below (a dummy password is enough for screen 1). Use a private tab, so no
 address is remembered by the site.
 
-- [ ] I1 Google (`accounts.google.com`), vault unlocked. Screen 1: the badge
+- [x] I1 Google (`accounts.google.com`), vault unlocked. Screen 1: the badge
       sits in the email field. Tap it: the address is filled, nothing else
       happens (no "Next"). Tap "Next" yourself; screen 2: the badge sits in the
       password field and fills the password.
-- [ ] I2 Microsoft, personal (`login.live.com`) and work
+      2026-11-27, 0.4.0 signed, release Firefox 161.0: pass.
+- [x] I2 Microsoft, personal (`login.live.com`) and work
       (`login.microsoftonline.com`): as I1.
-- [ ] I3 Amazon (`amazon.de` → Anmelden): as I1. Its field carries only
+      2026-11-27, 0.4.0: pass, both.
+- [x] I3 Amazon (`amazon.de` → Anmelden): as I1. Its field carries only
       `webauthn`.
-- [ ] I4 web.de, GMX and PayPal: does screen 1 show a badge? Not reached in
+      2026-11-27, 0.4.0: pass.
+- [x] I4 web.de, GMX and PayPal: does screen 1 show a badge? Not reached in
       step 0; record what the field carries (`about:debugging` → inspect) if
       not.
-- [ ] I5 Locked: lock the vault, open screen 1 of Google. The unlock badge
+      2026-11-27, 0.4.0: pass.
+- [x] I5 Locked: lock the vault, open screen 1 of Google. The unlock badge
       sits in the email field. Tap it, open the add-on by hand, unlock: only the
       address is filled, the page gets no password.
-- [ ] I6 A newsletter or search field (for example the search on
+      2026-11-27, 0.4.0: pass.
+- [x] I6 A newsletter or search field (for example the search on
       `de.wikipedia.org`): no badge.
+      2026-11-27, 0.4.0: pass, no badge.
 
 ## When this is done
 
