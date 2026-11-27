@@ -98,6 +98,7 @@ function makeSpies(c: Controller) {
       .spyOn(c, "matchesFor")
       .mockResolvedValue({ state: "unlocked", items: [] }),
     fill: vi.spyOn(c, "fill").mockResolvedValue(undefined),
+    fillUsername: vi.spyOn(c, "fillUsername").mockResolvedValue(undefined),
     totpFor: vi.spyOn(c, "totpFor").mockResolvedValue({ code: "123456", secondsRemaining: 30 }),
     setup: vi.spyOn(c, "setup").mockResolvedValue({ ok: true }),
     syncNow: vi.spyOn(c, "syncNow").mockResolvedValue(undefined),
@@ -229,6 +230,8 @@ describe("handleMessage request validation", () => {
     ["list with a non-string query", { kind: "list", query: { toLowerCase: null } }],
     ["fillFromPage with no itemId", { kind: "fillFromPage" }],
     ["fillFromPage with a non-string itemId", { kind: "fillFromPage", itemId: 7 }],
+    ["fillUsernameFromPage with no itemId", { kind: "fillUsernameFromPage" }],
+    ["fillUsernameFromPage with a non-string itemId", { kind: "fillUsernameFromPage", itemId: 7 }],
     ["fill with no tabId", { kind: "fill", itemId: "c1" }],
     ["fill with a string tabId", { kind: "fill", tabId: "7", itemId: "c1" }],
     ["fill with a NaN tabId", { kind: "fill", tabId: Number.NaN, itemId: "c1" }],
@@ -639,6 +642,43 @@ describe("fillFromPage", () => {
     await expect(
       handleMessage(controller, { kind: "fillFromPage", itemId: "c1" }, CONTENT_SCRIPT, READY),
     ).rejects.toThrow(/insecure/i);
+  });
+});
+
+describe("fillUsernameFromPage", () => {
+  const CONTENT_SCRIPT: browser.runtime.MessageSender = {
+    id: THIS_EXTENSION_ID,
+    tab: { id: 7, url: "https://real.example/login" } as browser.tabs.Tab,
+  };
+
+  it("routes to fillUsername with the sender's own tab", async () => {
+    await handleMessage(
+      controller,
+      { kind: "fillUsernameFromPage", itemId: "c1" },
+      CONTENT_SCRIPT,
+      READY,
+    );
+    expect(spies.fillUsername).toHaveBeenCalledWith(7, "c1");
+    expect(spies.fill).not.toHaveBeenCalled();
+  });
+
+  it("refuses a tabless sender rather than falling back to the active tab", async () => {
+    BROWSER_STUB.tabs.query = async () => [{ id: 3, url: "https://active.example/login" }];
+
+    await expect(
+      handleMessage(controller, { kind: "fillUsernameFromPage", itemId: "c1" }, SELF, READY),
+    ).rejects.toThrow(/no tab/i);
+    expect(spies.fillUsername).not.toHaveBeenCalled();
+  });
+
+  it("ignores a tabId named in the message", async () => {
+    await handleMessage(
+      controller,
+      { kind: "fillUsernameFromPage", itemId: "c1", tabId: 99 },
+      CONTENT_SCRIPT,
+      READY,
+    );
+    expect(spies.fillUsername).toHaveBeenCalledWith(7, "c1");
   });
 });
 

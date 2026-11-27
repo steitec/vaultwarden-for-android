@@ -1235,6 +1235,77 @@ describe("Controller", () => {
   });
 });
 
+describe("fillUsername", () => {
+  // The identifier screen of an email-first login (F-1). Same guards as
+  // fill(); the message never carries a password.
+  it("sends the username and a null password", async () => {
+    const { controller } = await makeController();
+    await controller.unlock(PIN);
+    const { get, sendMessage } = stubTabs("https://github.com/login");
+
+    await controller.fillUsername(7, "c1");
+
+    expect(get).toHaveBeenCalledWith(7);
+    expect(sendMessage).toHaveBeenCalledWith(7, {
+      kind: "fill",
+      username: "octocat",
+      password: null,
+    });
+  }, 20000);
+
+  it("refuses an entry with no username, without sending anything", async () => {
+    const { controller } = await makeController({
+      cipherCache: await cacheOf([
+        { id: "nouser", name: "No user", username: null, uris: ["https://github.com"] },
+      ]),
+    });
+    await controller.unlock(PIN);
+    const { sendMessage } = stubTabs("https://github.com/login");
+
+    await expect(controller.fillUsername(7, "nouser")).rejects.toThrow(/no username/i);
+    expect(sendMessage).not.toHaveBeenCalled();
+  }, 20000);
+
+  it("still fills the username of an entry that has no password", async () => {
+    const { controller } = await makeController({
+      cipherCache: await cacheOf([
+        { id: "nopw", name: "No password", password: null, uris: ["https://github.com"] },
+      ]),
+    });
+    await controller.unlock(PIN);
+    const { sendMessage } = stubTabs("https://github.com/login");
+
+    await controller.fillUsername(7, "nopw");
+    expect(sendMessage).toHaveBeenCalledWith(7, { kind: "fill", username: "octocat", password: null });
+  }, 20000);
+
+  it("refuses a plain http page", async () => {
+    const { controller } = await makeController();
+    await controller.unlock(PIN);
+    const { sendMessage } = stubTabs("http://github.com/login");
+
+    await expect(controller.fillUsername(7, "c1")).rejects.toThrow(/insecure/i);
+    expect(sendMessage).not.toHaveBeenCalled();
+  }, 20000);
+
+  it("refuses when the tab no longer matches the entry", async () => {
+    const { controller } = await makeController();
+    await controller.unlock(PIN);
+    const { sendMessage } = stubTabs("https://evil.test/");
+
+    await expect(controller.fillUsername(7, "c1")).rejects.toThrow(/does not match/i);
+    expect(sendMessage).not.toHaveBeenCalled();
+  }, 20000);
+
+  it("refuses while locked", async () => {
+    const { controller } = await makeController();
+    const { sendMessage } = stubTabs("https://github.com/login");
+
+    await expect(controller.fillUsername(7, "c1")).rejects.toThrow(/locked/i);
+    expect(sendMessage).not.toHaveBeenCalled();
+  }, 20000);
+});
+
 describe("pending fill", () => {
   const FRITZ: Seed[] = [{ id: "fb", name: "Router", uris: ["https://fritz.box"] }];
 

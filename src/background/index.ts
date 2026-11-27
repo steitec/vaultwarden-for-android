@@ -171,6 +171,12 @@ async function dispatch(
       if (tabId === undefined) throw new Error("No tab to fill");
       return controller.fill(tabId, msg.itemId);
     }
+    case "fillUsernameFromPage": {
+      // As fillFromPage: the sender's own tab, never a fallback.
+      const tabId = sender.tab?.id;
+      if (tabId === undefined) throw new Error("No tab to fill");
+      return controller.fillUsername(tabId, msg.itemId);
+    }
     case "totp":
       return controller.totpFor(msg.itemId);
     case "setup":
