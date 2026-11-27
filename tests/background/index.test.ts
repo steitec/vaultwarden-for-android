@@ -231,6 +231,8 @@ describe("handleMessage request validation", () => {
     ["fillFromPage with no itemId", { kind: "fillFromPage" }],
     ["fillFromPage with a non-string itemId", { kind: "fillFromPage", itemId: 7 }],
     ["fillUsernameFromPage with no itemId", { kind: "fillUsernameFromPage" }],
+    ["handOff with an unknown scope", { kind: "handOff", scope: "password" }],
+    ["handOff with a non-string scope", { kind: "handOff", scope: 1 }],
     ["fillUsernameFromPage with a non-string itemId", { kind: "fillUsernameFromPage", itemId: 7 }],
     ["fill with no tabId", { kind: "fill", itemId: "c1" }],
     ["fill with a string tabId", { kind: "fill", tabId: "7", itemId: "c1" }],
@@ -715,6 +717,24 @@ describe("handOff", () => {
     expect(record).toHaveBeenCalledWith(
       expect.objectContaining({ tabId: 7, origin: "https://fritz.box" }),
     );
+  });
+
+  it("records a username-scope pending fill for handOff { scope: 'username' }", async () => {
+    spies.status.mockReturnValue({ ...LOCKED_STATUS });
+    const record = vi.spyOn(controller, "recordPending");
+
+    await handleMessage(controller, { kind: "handOff", scope: "username" }, CONTENT_SCRIPT, READY);
+
+    expect(record).toHaveBeenCalledWith(expect.objectContaining({ scope: "username" }));
+  });
+
+  it("records a login-scope pending fill for a bare handOff", async () => {
+    spies.status.mockReturnValue({ ...LOCKED_STATUS });
+    const record = vi.spyOn(controller, "recordPending");
+
+    await handleMessage(controller, { kind: "handOff" }, CONTENT_SCRIPT, READY);
+
+    expect(record).toHaveBeenCalledWith(expect.objectContaining({ scope: "login" }));
   });
 
   it("records the origin, not the whole URL", async () => {

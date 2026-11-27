@@ -220,10 +220,11 @@ export class Controller {
    * meantime may fail the unlock the user actually asked for -- they typed
    * the right PIN, so their vault opens either way.
    *
-   * `fill` is called unchanged rather than reimplemented, so every guard it
-   * already runs applies again here: isFillableOrigin, the uriMatches recheck
-   * against the tab's current URL, and the refusal for an entry with no
-   * password. This is an intent to call it, never a way around it.
+   * `fill` (or `fillUsername`, for a tap from the identifier screen) is called
+   * unchanged rather than reimplemented, so every guard it already runs
+   * applies again here: isFillableOrigin, the uriMatches recheck against the
+   * tab's current URL, and the refusal for an entry with nothing to fill.
+   * This is an intent to call it, never a way around it.
    */
   private async redeemPending(): Promise<void> {
     const p = this.pending;
@@ -242,7 +243,10 @@ export class Controller {
       const only = matches.length === 1 ? matches[0] : undefined;
       if (only === undefined) return;
 
-      await this.fill(p.tabId, only.id);
+      // A tap from the identifier screen stays username-only, whatever the
+      // page shows by now.
+      if (p.scope === "username") await this.fillUsername(p.tabId, only.id);
+      else await this.fill(p.tabId, only.id);
     } catch {
       // A closed tab, a navigated tab, an entry fill() refuses. None of them
       // are the unlock's problem.

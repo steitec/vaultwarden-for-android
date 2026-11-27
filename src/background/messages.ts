@@ -145,7 +145,7 @@ export type Request =
   | { kind: "fill"; tabId: number; itemId: string }
   | { kind: "fillFromPage"; itemId: string }
   | { kind: "fillUsernameFromPage"; itemId: string }
-  | { kind: "handOff" }
+  | { kind: "handOff"; scope?: "username" }
   | { kind: "totp"; itemId: string }
   | {
       kind: "setup";
@@ -240,9 +240,12 @@ export function isRequest(v: unknown): v is Request {
     // tab's URL itself rather than accepting one from a caller, because the
     // content script now runs on pages this addon does not control.
     case "matches":
-    // Likewise `handOff`: the tab it concerns is the sender's own.
-    case "handOff":
       return true;
+    // Likewise `handOff`: the tab it concerns is the sender's own. Its one
+    // optional field narrows the fill to the username (F-1); absent means a
+    // full login fill, and any other value is malformed.
+    case "handOff":
+      return !("scope" in v) || v.scope === undefined || v.scope === "username";
     case "setup":
       // Every field is checked, not just presence: a non-string serverUrl
       // would reach `new URL()`, a non-string password would reach the KDF,
