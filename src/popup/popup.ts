@@ -70,6 +70,7 @@ const REQUEST_TIMEOUT_MS: Record<Request["kind"], number> = {
   totp: 4000,
   fill: 4000,
   fillFromPage: 4000,
+  fillUsernameFromPage: 4000,
   itemDetail: 4000,
   handOff: 4000,
   lock: 4000,

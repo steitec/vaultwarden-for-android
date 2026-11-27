@@ -144,6 +144,7 @@ export type Request =
   | { kind: "matches" }
   | { kind: "fill"; tabId: number; itemId: string }
   | { kind: "fillFromPage"; itemId: string }
+  | { kind: "fillUsernameFromPage"; itemId: string }
   | { kind: "handOff" }
   | { kind: "totp"; itemId: string }
   | {
@@ -278,6 +279,7 @@ export function isRequest(v: unknown): v is Request {
         isString(v.itemId)
       );
     case "fillFromPage":
+    case "fillUsernameFromPage":
       return "itemId" in v && isString(v.itemId);
     case "totp":
       return "itemId" in v && isString(v.itemId);

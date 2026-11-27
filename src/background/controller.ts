@@ -732,7 +732,13 @@ export class Controller {
     throw new Error("This entry is no longer in the vault. Sync and try again.");
   }
 
-  async fill(tabId: number, itemId: string): Promise<void> {
+  /**
+   * The entry a fill may send, after the guards every fill shares: the entry
+   * exists, the tab's own URL is a fillable origin, and the entry matches
+   * that URL. Used by both `fill` and `fillUsername`, so neither can drift
+   * from the other.
+   */
+  private async fillableTarget(tabId: number, itemId: string): Promise<VaultItem> {
     const item = this.require("user").find((i) => i.id === itemId);
     if (item === undefined) throw new Error("Item not found");
 
@@ -760,6 +766,12 @@ export class Controller {
       );
     }
 
+    return item;
+  }
+
+  async fill(tabId: number, itemId: string): Promise<void> {
+    const item = await this.fillableTarget(tabId, itemId);
+
     // `undecryptable === false` does not imply fillable: a login cipher can
     // legitimately have URIs and no password at all, and matchItems returns
     // it. Sending for one of those would report success for a fill that left
@@ -783,6 +795,23 @@ export class Controller {
       kind: "fill",
       username: item.username,
       password: item.password,
+    });
+  }
+
+  /**
+   * The identifier screen of an email-first login (F-1): fills the username
+   * only. The message carries `password: null` whatever the entry holds, so
+   * a page that has no password field yet never receives one.
+   */
+  async fillUsername(tabId: number, itemId: string): Promise<void> {
+    const item = await this.fillableTarget(tabId, itemId);
+    if (item.username === null) {
+      throw new Error("This entry has no username to fill.");
+    }
+    await browser.tabs.sendMessage(tabId, {
+      kind: "fill",
+      username: item.username,
+      password: null,
     });
   }
 }
