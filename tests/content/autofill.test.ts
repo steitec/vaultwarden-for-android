@@ -38,8 +38,14 @@ vi.stubGlobal("browser", {
   },
 });
 
-const { findLoginFields, fillFields, refreshBadge, startObserving, stopPageWatch } =
-  await import("../../src/content/autofill");
+const {
+  findLoginFields,
+  findIdentifierField,
+  fillFields,
+  refreshBadge,
+  startObserving,
+  stopPageWatch,
+} = await import("../../src/content/autofill");
 
 // Importing the module installs a document watch, exactly as it does in a
 // real page. Every test below drives refreshBadge or its own observer
@@ -436,6 +442,68 @@ describe("off-screen decoy fields detected by rendered geometry", () => {
 
     expect(fillFields(document, CREDS)).toEqual({ filledUsername: true, filledPassword: true });
     expect(document.querySelector<HTMLInputElement>("#realpass")!.value).toBe("hunter2");
+  });
+});
+
+describe("findIdentifierField", () => {
+  it("finds a visible field whose autocomplete carries the username token", () => {
+    setBody(`<input type="email" id="id" autocomplete="username">`);
+    expect(findIdentifierField(document)?.id).toBe("id");
+  });
+
+  it("reads the token among others and in any case", () => {
+    setBody(`<input type="text" id="a" autocomplete="Section-Login USERNAME webauthn">`);
+    expect(findIdentifierField(document)?.id).toBe("a");
+  });
+
+  it("takes webauthn alone, as Amazon sets it", () => {
+    setBody(`<input type="text" name="email" id="az" autocomplete="webauthn">`);
+    expect(findIdentifierField(document)?.id).toBe("az");
+  });
+
+  it("does not take autocomplete=email, a bare email field, or a name hint", () => {
+    setBody(`<input type="email" autocomplete="email"><input type="email"><input name="username">`);
+    expect(findIdentifierField(document)).toBeNull();
+  });
+
+  it("does not take a token that only contains the word", () => {
+    setBody(`<input type="text" autocomplete="new-username"><input type="text" autocomplete="usernames">`);
+    expect(findIdentifierField(document)).toBeNull();
+  });
+
+  it("returns null when the page has a usable password field", () => {
+    setBody(`<input autocomplete="username"><input type="password">`);
+    expect(findIdentifierField(document)).toBeNull();
+  });
+
+  it("rejects a marked field that is hidden, disabled, read-only or parked off-screen", () => {
+    setBody(`
+      <div hidden><input autocomplete="username"></div>
+      <input autocomplete="username" disabled>
+      <input autocomplete="username" readonly>
+      <div style="position:absolute;left:-9999px"><input autocomplete="username"></div>`);
+    expect(findIdentifierField(document)).toBeNull();
+  });
+
+  it("takes the first usable marked field in document order", () => {
+    setBody(`<input autocomplete="username" id="one"><input autocomplete="username" id="two">`);
+    expect(findIdentifierField(document)?.id).toBe("one");
+  });
+});
+
+describe("fillFields on an identifier screen", () => {
+  it("with no password field, fills the marked identifier field rather than the first text input", () => {
+    setBody(`<input type="text" id="search"><input type="email" id="id" autocomplete="username">`);
+    const r = fillFields(document, { username: "a@b.de", password: null });
+    expect(document.querySelector<HTMLInputElement>("#id")!.value).toBe("a@b.de");
+    expect(document.querySelector<HTMLInputElement>("#search")!.value).toBe("");
+    expect(r).toEqual({ filledUsername: true, filledPassword: false });
+  });
+
+  it("with no password field and no marked field, keeps today's first-text-input choice", () => {
+    setBody(`<input type="text" id="first">`);
+    fillFields(document, { username: "a@b.de", password: null });
+    expect(document.querySelector<HTMLInputElement>("#first")!.value).toBe("a@b.de");
   });
 });
 
