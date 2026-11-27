@@ -112,6 +112,12 @@ left to fill. The popup path still works.
 Not a blocker for a private install. Worth a decision before a listed submission,
 because it will read as "the extension does nothing on my mail provider".
 
+**Resolved in 0.4.0** (2026-11-27). On a page with no usable password field,
+a visible field marked `autocomplete="username"` or `"webauthn"` gets the
+badge, and a tap fills the username only. Google and both Microsoft logins
+carry `username`, Amazon `webauthn` alone (`docs/DEVICE-CHECKS.md` → "F-1
+step 0").
+
 ### F-2 — The lockout warning can never appear during a lockout (C4's failure)
 
 The PIN pad is meant to warn from three attempts down: "N attempts remaining

@@ -90,11 +90,11 @@ eventually be somebody's bug report. Full write-ups in `docs/DEVELOPMENT.md` →
 Every check below that needs the phone is collected, in run order, in
 `docs/DEVICE-CHECKS.md`.
 
-- **Email-first login flows get no badge at step 1** (F-1). web.de, Google,
-  Microsoft: the first screen has no password field, so the content script stays
-  silent by design — and on the next screen there is usually no username field
-  left to fill. The popup path still works. Reads as "the extension does nothing
-  on my mail provider", so it wants a decision before a listed submission.
+- ~~**Email-first login flows get no badge at step 1** (F-1).~~ **Fixed in
+  0.4.0**: a field marked `autocomplete="username"` or `"webauthn"` on a page
+  without a password field gets the badge, and a tap fills the username only
+  (design `docs/superpowers/specs/2026-11-26-identifier-first-login-design.md`).
+  Unmarked fields are still never guessed at.
 - ~~**A `<select>` username field is never filled.**~~ **Fixed on `main`
   2026-11-07**, in 0.3.2. A dropdown is taken only when the form has
   no text input, and a username no option carries leaves it untouched. See
