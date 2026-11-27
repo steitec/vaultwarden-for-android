@@ -25,7 +25,7 @@ dependencies.
 - **No new runtime dependencies.** `hash-wasm` remains the only one.
 - **No `as` casts on unvalidated data.** Narrow message payloads with real checks in `isRequest`.
 - **Repository language is English**: code, comments, tests, docs, commit messages. No Co-Authored-By trailer.
-- **The signal is the `autocomplete` token `username`, nothing else.** `"email"` alone, `type="email"`, names or ids never trigger the identifier path.
+- **The signal is the `autocomplete` token `username` or `webauthn`, nothing else** (`webauthn` added 2026-11-27 after step 0: Amazon). `"email"` alone, `type="email"`, names or ids never trigger the identifier path.
 - **No password reaches the content script on the identifier path.** Not on a tap, and not when a pending fill is redeemed after an unlock.
 - **A page with neither a usable password field nor a marked username field sends no message.** This is the existing guarantee, and it stays true.
 - **Only trusted taps count** (`isUserGesture`, F-10), on the new badge exactly as on the old one.
@@ -79,6 +79,10 @@ it("reads the token among others and in any case", () => {
   setBody(`<input type="text" id="a" autocomplete="Section-Login USERNAME webauthn">`);
   expect(findIdentifierField(document)?.id).toBe("a");
 });
+it("takes webauthn alone, as Amazon sets it", () => {
+  setBody(`<input type="text" name="email" id="az" autocomplete="webauthn">`);
+  expect(findIdentifierField(document)?.id).toBe("az");
+});
 it("does not take autocomplete=email, a bare email field, or a name hint", () => {
   setBody(`<input type="email" autocomplete="email"><input type="email"><input name="username">`);
   expect(findIdentifierField(document)).toBeNull();
@@ -127,7 +131,7 @@ Expected: FAIL, `findIdentifierField is not a function` (add it to the dynamic `
 
 - [ ] **Step 3: Implement `findIdentifierField(doc: Document): HTMLInputElement | null`** in `src/content/autofill.ts`.
   - Return `null` whenever `findLoginFields(doc).password` is not null.
-  - Otherwise, among `USERNAME_SELECTOR` matches that pass `isUsable(el, hasLayout(doc))`, return the first whose `autocomplete` attribute, lowercased and split on whitespace, contains `"username"`.
+  - Otherwise, among `USERNAME_SELECTOR` matches that pass `isUsable(el, hasLayout(doc))`, return the first whose `autocomplete` attribute, lowercased and split on whitespace, contains `"username"` or `"webauthn"`.
   - Read the attribute with `getAttribute("autocomplete")`, not the `.autocomplete` IDL property: jsdom and Firefox differ there for non-canonical token lists.
   - Then change `fillFields`: when `findLoginFields` returns `password === null`, fill the username into `findIdentifierField(doc) ?? fields.username`.
 
