@@ -762,6 +762,143 @@ describe("refreshBadge", () => {
     });
   });
 
+  describe("on an identifier screen", () => {
+    // The first screen of an email-first login (F-1): no password field yet,
+    // but a field marked as the login identifier.
+    const ID = `<input type="email" autocomplete="username">`;
+    const ONE = {
+      state: "unlocked",
+      items: [{ id: "c1", name: "Mail", username: "a@b.de", undecryptable: false }],
+    };
+
+    let roots: ShadowRoot[] = [];
+    const NATIVE_ATTACH = HTMLElement.prototype.attachShadow;
+    beforeEach(() => {
+      roots = [];
+      HTMLElement.prototype.attachShadow = function (this: HTMLElement, init: ShadowRootInit) {
+        const root = NATIVE_ATTACH.call(this, init);
+        roots.push(root);
+        return root;
+      };
+    });
+    afterEach(() => {
+      HTMLElement.prototype.attachShadow = NATIVE_ATTACH;
+    });
+
+    function rows(): HTMLElement[] {
+      return [...(roots.at(-1)?.querySelectorAll<HTMLElement>("[role=menuitem]") ?? [])];
+    }
+
+    it("asks the background page and mounts a fill badge for one entry with a username", async () => {
+      setBody(ID);
+      sendMessage.mockResolvedValue(ONE);
+
+      await refreshBadge(document);
+
+      expect(sendMessage).toHaveBeenCalledWith({ kind: "matches" });
+      expect(badge()?.getAttribute(BADGE_HOST_ATTR)).toBe("fill");
+    });
+
+    it("drops entries without a username, and shows nothing if none is left", async () => {
+      setBody(ID);
+      sendMessage.mockResolvedValue({
+        state: "unlocked",
+        items: [{ id: "c1", name: "Mail", username: null, undecryptable: false }],
+      });
+
+      await refreshBadge(document);
+
+      expect(badge()).toBeNull();
+    });
+
+    it("counts only entries with a username when choosing between fill and chooser", async () => {
+      setBody(ID);
+      sendMessage.mockResolvedValue({
+        state: "unlocked",
+        items: [
+          { id: "c1", name: "Mail", username: "a@b.de", undecryptable: false },
+          { id: "c2", name: "Card PIN", username: null, undecryptable: false },
+        ],
+      });
+      await refreshBadge(document);
+      sendMessage.mockClear();
+
+      expect(badge()?.getAttribute(BADGE_HOST_ATTR)).toBe("fill");
+      tapBadge();
+      expect(sendMessage).toHaveBeenCalledWith({ kind: "fillUsernameFromPage", itemId: "c1" });
+    });
+
+    it("sends fillUsernameFromPage, not fillFromPage, on a tap", async () => {
+      setBody(ID);
+      sendMessage.mockResolvedValue(ONE);
+      await refreshBadge(document);
+      sendMessage.mockClear();
+
+      tapBadge();
+
+      expect(sendMessage).toHaveBeenCalledWith({ kind: "fillUsernameFromPage", itemId: "c1" });
+      expect(sendMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "fillFromPage" }),
+      );
+    });
+
+    it("shows the chooser for several entries, and a row tap fills that username only", async () => {
+      setBody(ID);
+      sendMessage.mockResolvedValue({
+        state: "unlocked",
+        items: [
+          { id: "c1", name: "Mail", username: "a@b.de", undecryptable: false },
+          { id: "c2", name: "Work", username: "w@b.de", undecryptable: false },
+        ],
+      });
+      await refreshBadge(document);
+      sendMessage.mockClear();
+
+      expect(badge()?.getAttribute(BADGE_HOST_ATTR)).toBe("chooser");
+      tapBadge();
+      rows()[1]?.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
+
+      expect(sendMessage).toHaveBeenCalledWith({ kind: "fillUsernameFromPage", itemId: "c2" });
+    });
+
+    it("mounts an unlock badge while locked and hands off with scope username", async () => {
+      setBody(ID);
+      sendMessage.mockResolvedValue({ state: "locked" });
+      await refreshBadge(document);
+      sendMessage.mockClear();
+
+      expect(badge()?.getAttribute(BADGE_HOST_ATTR)).toBe("unlock");
+      tapBadge();
+
+      expect(sendMessage).toHaveBeenCalledWith({ kind: "handOff", scope: "username" });
+    });
+
+    it("does not take the identifier path on a page that also has a password field", async () => {
+      setBody(`${ID}<input type="password">`);
+      sendMessage.mockResolvedValue(ONE);
+      await refreshBadge(document);
+      sendMessage.mockClear();
+
+      tapBadge();
+
+      expect(sendMessage).toHaveBeenCalledWith({ kind: "fillFromPage", itemId: "c1" });
+    });
+
+    it("replaces the identifier badge by the password badge when the screen changes", async () => {
+      setBody(ID);
+      sendMessage.mockResolvedValue(ONE);
+      await refreshBadge(document);
+
+      setBody(`<input type="password">`);
+      await refreshBadge(document);
+      sendMessage.mockClear();
+
+      expect(document.querySelectorAll(`[${BADGE_HOST_ATTR}]`)).toHaveLength(1);
+      tapBadge();
+      expect(sendMessage).toHaveBeenCalledWith({ kind: "fillFromPage", itemId: "c1" });
+    });
+  });
+
   it("hands off to the popup when the vault is locked", async () => {
     setBody(`<input type="password">`);
     sendMessage.mockResolvedValue({ state: "locked" });

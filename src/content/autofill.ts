@@ -337,17 +337,18 @@ let unmountBadge: (() => void) | null = null;
 /**
  * Decide what this page can offer, and offer it.
  *
- * The order matters. The password field is looked for BEFORE the background
- * page is asked anything, so a page with no login form never produces a
- * message at all: the background page learns nothing about the ordinary
- * browsing of someone who is not signing in to something.
+ * The order matters. The password field (or, failing that, a field marked
+ * as the login identifier) is looked for BEFORE the background page is asked
+ * anything, so a page with no login form never produces a message at all:
+ * the background page learns nothing about the ordinary browsing of someone
+ * who is not signing in to something.
  */
 export async function refreshBadge(doc: Document): Promise<void> {
   unmountBadge?.();
   unmountBadge = null;
 
-  const { password } = findLoginFields(doc);
-  if (password === null) return;
+  const target = badgeTarget(doc);
+  if (target === null) return;
 
   let matches: PageMatches;
   try {
@@ -359,27 +360,48 @@ export async function refreshBadge(doc: Document): Promise<void> {
     return;
   }
 
+  // On the identifier screen only the username can be filled, so an entry
+  // without one has nothing to offer there.
+  if (target.scope === "username" && matches.state === "unlocked") {
+    matches = { ...matches, items: matches.items.filter((i) => i.username !== null) };
+  }
+
   const mode = modeFor(matches);
   if (mode === null) return;
 
   if (matches.state === "locked") {
     // Nothing can be filled before the unlock, and the unlock happens in the
     // popup: hand off, and the background page records the pending fill.
-    unmountBadge = mountBadge(password, "unlock", () => {
-      void handOff();
+    unmountBadge = mountBadge(target.field, "unlock", () => {
+      void handOff(target.scope);
     });
     return;
   }
 
   const [only] = matches.items;
   if (mode === "fill" && only !== undefined) {
-    unmountBadge = mountBadge(password, "fill", () => {
-      void fillFromPage(only.id);
+    unmountBadge = mountBadge(target.field, "fill", () => {
+      void fillFromPage(target.scope, only.id);
     });
     return;
   }
 
-  unmountBadge = mountChooserBadge(password, matches.items);
+  unmountBadge = mountChooserBadge(target, matches.items);
+}
+
+/**
+ * Where the badge goes and what a tap on it may fill. A usable password field
+ * always wins; only a page without one falls back to a field marked as the
+ * login identifier (F-1), and that fill is username-only.
+ */
+type BadgeTarget = { field: HTMLInputElement; scope: "login" | "username" };
+
+function badgeTarget(doc: Document): BadgeTarget | null {
+  const { password } = findLoginFields(doc);
+  if (password !== null) return { field: password, scope: "login" };
+  const identifier = findIdentifierField(doc);
+  if (identifier !== null) return { field: identifier, scope: "username" };
+  return null;
 }
 
 /**
@@ -388,7 +410,7 @@ export async function refreshBadge(doc: Document): Promise<void> {
  * unmount takes the list down with the badge, so a refresh never leaves a
  * list behind pointing at entries that may no longer match.
  */
-function mountChooserBadge(password: HTMLInputElement, items: ItemSummary[]): () => void {
+function mountChooserBadge(target: BadgeTarget, items: ItemSummary[]): () => void {
   let closeList: (() => void) | null = null;
   let badgeHost: HTMLElement | null = null;
 
@@ -396,7 +418,7 @@ function mountChooserBadge(password: HTMLInputElement, items: ItemSummary[]): ()
     badgeHost?.setAttribute("aria-expanded", String(open));
   };
 
-  const unmount = mountBadge(password, "chooser", (host) => {
+  const unmount = mountBadge(target.field, "chooser", (host) => {
     badgeHost = host;
     if (closeList !== null) {
       closeList();
@@ -405,10 +427,10 @@ function mountChooserBadge(password: HTMLInputElement, items: ItemSummary[]): ()
       return;
     }
     closeList = mountChooser(
-      password,
+      target.field,
       items,
       (itemId) => {
-        void fillFromPage(itemId);
+        void fillFromPage(target.scope, itemId);
       },
       () => {
         closeList = null;
@@ -425,9 +447,10 @@ function mountChooserBadge(password: HTMLInputElement, items: ItemSummary[]): ()
   };
 }
 
-async function fillFromPage(itemId: string): Promise<void> {
+async function fillFromPage(scope: BadgeTarget["scope"], itemId: string): Promise<void> {
+  const kind = scope === "username" ? "fillUsernameFromPage" : "fillFromPage";
   try {
-    await browser.runtime.sendMessage({ kind: "fillFromPage", itemId });
+    await browser.runtime.sendMessage({ kind, itemId });
   } catch {
     // A refused fill. The background page owns the user-facing report.
   }
@@ -445,9 +468,11 @@ function modeFor(matches: PageMatches): BadgeMode | null {
   return matches.items.length === 1 ? "fill" : "chooser";
 }
 
-async function handOff(): Promise<void> {
+async function handOff(scope: BadgeTarget["scope"]): Promise<void> {
+  // A bare handOff is a login fill; only the identifier screen says so.
+  const msg = scope === "username" ? { kind: "handOff", scope } : { kind: "handOff" };
   try {
-    await browser.runtime.sendMessage({ kind: "handOff" });
+    await browser.runtime.sendMessage(msg);
   } catch {
     // A handOff whose handler does not exist yet. Nothing to do on the page.
   }
