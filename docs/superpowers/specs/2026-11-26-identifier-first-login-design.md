@@ -4,6 +4,12 @@ Draft 2026-11-26, for approval. Approach chosen in conversation: detect the
 first screen by `autocomplete="username"` only, and fill it with a message that
 carries the username and nothing else.
 
+**Amended 2026-11-27 after step 0:** Amazon marks its identifier field with
+`autocomplete="webauthn"` alone. The signal is now the token `username` **or**
+the token `webauthn`. Both are reserved for credential fields; names, ids and
+a bare `type="email"` still never count. Wherever this document says
+`autocomplete="username"`, read "either token".
+
 ## Why
 
 On email-first ("identifier-first") logins — web.de, Google, Microsoft and

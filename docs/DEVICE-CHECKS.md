@@ -211,6 +211,28 @@ Clear both fields first, or use a private tab.
       2026-11-23, 0.3.4: pass. Second entry deleted, synced; a real tap on
       the lock badge filled.
 
+## F-1 step 0: identifier fields (2026-11-27)
+
+Which first-screen field of an email-first login carries which
+`autocomplete` tokens. Checked from the desktop with headless Firefox
+(Playwright, Android Firefox user agent, 412 px wide); the verdict
+"identifier path" comes from running the add-on's own `findLoginFields` on
+the live page, not from reading the markup by eye.
+
+| Site | Field on screen 1 | `autocomplete` | Usable password field? |
+|---|---|---|---|
+| accounts.google.com | `text`, name `identifier` | `username webauthn` | none (a hidden `hiddenPassword` is rejected) |
+| login.live.com | `email`, id `usernameEntry` | `username webauthn` | none |
+| login.microsoftonline.com | `email`, name `loginfmt` | `username webauthn` | none (`passwd` has a box but is rejected as not visible) |
+| amazon.de | `text`, name `email` | `webauthn` | none (a hidden `password` is rejected) |
+| paypal.com | not reached: captcha against the automated browser | | |
+| web.de, gmx.net | not reached: the login sits behind web components and iframes | | |
+
+Decision (2026-11-27, with the owner): the signal is the token `username`
+**or** the token `webauthn`. `webauthn` alone is what Amazon sets; the HTML
+standard puts it only on credential fields. PayPal, web.de and GMX are
+checked on the phone with the signed build (section I below).
+
 ## When this is done
 
 - Results into this file, findings at the bottom.
