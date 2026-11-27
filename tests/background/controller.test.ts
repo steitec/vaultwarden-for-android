@@ -1312,7 +1312,7 @@ describe("pending fill", () => {
   it("fills the recorded tab after a successful unlock", async () => {
     const { controller } = await makeController({ cipherCache: await cacheOf(FRITZ) });
     const { sendMessage } = stubTabs("https://fritz.box/login");
-    controller.recordPending({ tabId: 7, origin: "https://fritz.box", at: Date.now() });
+    controller.recordPending({ tabId: 7, origin: "https://fritz.box", at: Date.now(), scope: "login" });
 
     await controller.unlock(PIN);
 
@@ -1321,6 +1321,48 @@ describe("pending fill", () => {
       username: "octocat",
       password: "hunter2",
     });
+  }, 20000);
+
+  it("redeems a username-scope tap with the username only", async () => {
+    const { controller } = await makeController({ cipherCache: await cacheOf(FRITZ) });
+    const { sendMessage } = stubTabs("https://fritz.box/login");
+    controller.recordPending({
+      tabId: 7,
+      origin: "https://fritz.box",
+      at: Date.now(),
+      scope: "username",
+    });
+
+    await controller.unlock(PIN);
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage).toHaveBeenCalledWith(7, {
+      kind: "fill",
+      username: "octocat",
+      password: null,
+    });
+  }, 20000);
+
+  it("keeps a username-scope tap password-free when the page moved on to its password screen", async () => {
+    // The user tapped the identifier badge while locked, then went on to the
+    // next screen during the unlock. Same origin, so the tap still redeems;
+    // it must still be the username-only fill it was recorded as.
+    const { controller } = await makeController({ cipherCache: await cacheOf(FRITZ) });
+    const { sendMessage } = stubTabs("https://fritz.box/login/password");
+    controller.recordPending({
+      tabId: 7,
+      origin: "https://fritz.box",
+      at: Date.now(),
+      scope: "username",
+    });
+
+    await controller.unlock(PIN);
+
+    expect(sendMessage).toHaveBeenCalledWith(7, expect.objectContaining({ password: null }));
+    expect(sendMessage).not.toHaveBeenCalledWith(
+      7,
+      expect.objectContaining({ password: "hunter2" }),
+    );
   }, 20000);
 
   it("fills nothing when the unlock was not preceded by a tap", async () => {
@@ -1335,7 +1377,7 @@ describe("pending fill", () => {
   it("discards the pending fill on lock, so a later unlock does not fire it", async () => {
     const { controller } = await makeController({ cipherCache: await cacheOf(FRITZ) });
     const { sendMessage } = stubTabs("https://fritz.box/login");
-    controller.recordPending({ tabId: 7, origin: "https://fritz.box", at: Date.now() });
+    controller.recordPending({ tabId: 7, origin: "https://fritz.box", at: Date.now(), scope: "login" });
 
     controller.lock();
     await controller.unlock(PIN);
@@ -1346,7 +1388,7 @@ describe("pending fill", () => {
   it("consumes the pending fill, so a second unlock does not fill again", async () => {
     const { controller } = await makeController({ cipherCache: await cacheOf(FRITZ) });
     const { sendMessage } = stubTabs("https://fritz.box/login");
-    controller.recordPending({ tabId: 7, origin: "https://fritz.box", at: Date.now() });
+    controller.recordPending({ tabId: 7, origin: "https://fritz.box", at: Date.now(), scope: "login" });
 
     await controller.unlock(PIN);
     expect(sendMessage).toHaveBeenCalledTimes(1);
@@ -1362,7 +1404,7 @@ describe("pending fill", () => {
     // The whole reason the origin is recorded rather than the tab alone.
     const { controller } = await makeController({ cipherCache: await cacheOf(FRITZ) });
     const { sendMessage } = stubTabs("https://evil.example/login");
-    controller.recordPending({ tabId: 7, origin: "https://fritz.box", at: Date.now() });
+    controller.recordPending({ tabId: 7, origin: "https://fritz.box", at: Date.now(), scope: "login" });
 
     await controller.unlock(PIN);
 
@@ -1376,6 +1418,7 @@ describe("pending fill", () => {
       tabId: 7,
       origin: "https://fritz.box",
       at: Date.now() - (PENDING_TTL_MS + 1),
+      scope: "login",
     });
 
     await controller.unlock(PIN);
@@ -1393,7 +1436,7 @@ describe("pending fill", () => {
       ]),
     });
     const { sendMessage } = stubTabs("https://fritz.box/login");
-    controller.recordPending({ tabId: 7, origin: "https://fritz.box", at: Date.now() });
+    controller.recordPending({ tabId: 7, origin: "https://fritz.box", at: Date.now(), scope: "login" });
 
     await controller.unlock(PIN);
 
@@ -1403,7 +1446,7 @@ describe("pending fill", () => {
   it("does not fill when nothing matches, which is only knowable after unlocking", async () => {
     const { controller } = await makeController({ cipherCache: await cacheOf(FRITZ) });
     const { sendMessage } = stubTabs("https://nomatch.example/login");
-    controller.recordPending({ tabId: 7, origin: "https://nomatch.example", at: Date.now() });
+    controller.recordPending({ tabId: 7, origin: "https://nomatch.example", at: Date.now(), scope: "login" });
 
     await controller.unlock(PIN);
 
@@ -1417,7 +1460,7 @@ describe("pending fill", () => {
       cipherCache: await cacheOf([{ id: "fb", name: "Router", uris: ["http://fritz.box"] }]),
     });
     const { sendMessage } = stubTabs("http://fritz.box/login");
-    controller.recordPending({ tabId: 7, origin: "http://fritz.box", at: Date.now() });
+    controller.recordPending({ tabId: 7, origin: "http://fritz.box", at: Date.now(), scope: "login" });
 
     await controller.unlock(PIN);
 
@@ -1431,7 +1474,7 @@ describe("pending fill", () => {
       ]),
     });
     const { sendMessage } = stubTabs("https://fritz.box/login");
-    controller.recordPending({ tabId: 7, origin: "https://fritz.box", at: Date.now() });
+    controller.recordPending({ tabId: 7, origin: "https://fritz.box", at: Date.now(), scope: "login" });
 
     await controller.unlock(PIN);
 
@@ -1444,7 +1487,7 @@ describe("pending fill", () => {
     const { controller } = await makeController({ cipherCache: await cacheOf(FRITZ) });
     const get = vi.fn().mockRejectedValue(new Error("No tab with id 7"));
     vi.stubGlobal("browser", { tabs: { get, sendMessage: vi.fn() } });
-    controller.recordPending({ tabId: 7, origin: "https://fritz.box", at: Date.now() });
+    controller.recordPending({ tabId: 7, origin: "https://fritz.box", at: Date.now(), scope: "login" });
 
     await expect(controller.unlock(PIN)).resolves.not.toThrow();
     expect(controller.status().state).toBe("unlocked");

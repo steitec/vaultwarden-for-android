@@ -5,7 +5,17 @@
  * Held in memory only and never written to storage: a background-page restart
  * must lose it, which is the safe direction to fail.
  */
-export type PendingFill = { tabId: number; origin: string; at: number };
+export type PendingFill = {
+  tabId: number;
+  origin: string;
+  at: number;
+  /**
+   * What the tap asked for. `"username"` came from the identifier screen of
+   * an email-first login (F-1) and must stay username-only when redeemed,
+   * even if the page has reached its password screen by then.
+   */
+  scope: "login" | "username";
+};
 
 /** How long a tap stays redeemable. Long enough to type a PIN, not to walk away. */
 export const PENDING_TTL_MS = 120_000;

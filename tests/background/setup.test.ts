@@ -664,7 +664,7 @@ describe("Controller.setup and a pending fill", () => {
   it("fills the recorded tab after a master-password sign-in", async () => {
     const h = await lockedSessionAccount();
     const { sendMessage } = stubTabs("https://github.com/login");
-    h.controller.recordPending({ tabId: 7, origin: "https://github.com", at: Date.now() });
+    h.controller.recordPending({ tabId: 7, origin: "https://github.com", at: Date.now(), scope: "login" });
 
     await h.controller.setup({ serverUrl: SERVER, email: "a@b.com", password: PASSWORD, pin: "" });
 
@@ -678,7 +678,7 @@ describe("Controller.setup and a pending fill", () => {
   it("consumes the tap, so a second sign-in does not fill again", async () => {
     const h = await lockedSessionAccount();
     const { sendMessage } = stubTabs("https://github.com/login");
-    h.controller.recordPending({ tabId: 7, origin: "https://github.com", at: Date.now() });
+    h.controller.recordPending({ tabId: 7, origin: "https://github.com", at: Date.now(), scope: "login" });
 
     await h.controller.setup({ serverUrl: SERVER, email: "a@b.com", password: PASSWORD, pin: "" });
     expect(sendMessage).toHaveBeenCalledTimes(1);
@@ -695,7 +695,7 @@ describe("Controller.setup and a pending fill", () => {
     // with every guard it runs, rather than a shortcut of its own.
     const h = await lockedSessionAccount();
     const { sendMessage } = stubTabs("https://evil.example/login");
-    h.controller.recordPending({ tabId: 7, origin: "https://github.com", at: Date.now() });
+    h.controller.recordPending({ tabId: 7, origin: "https://github.com", at: Date.now(), scope: "login" });
 
     await h.controller.setup({ serverUrl: SERVER, email: "a@b.com", password: PASSWORD, pin: "" });
 
@@ -706,7 +706,7 @@ describe("Controller.setup and a pending fill", () => {
     const h = await lockedSessionAccount();
     const get = vi.fn().mockRejectedValue(new Error("No tab with id 7"));
     vi.stubGlobal("browser", { tabs: { get, sendMessage: vi.fn() } });
-    h.controller.recordPending({ tabId: 7, origin: "https://github.com", at: Date.now() });
+    h.controller.recordPending({ tabId: 7, origin: "https://github.com", at: Date.now(), scope: "login" });
 
     await expect(
       h.controller.setup({ serverUrl: SERVER, email: "a@b.com", password: PASSWORD, pin: "" }),

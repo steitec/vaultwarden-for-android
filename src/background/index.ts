@@ -153,6 +153,7 @@ async function dispatch(
             tabId: tab.id,
             origin: new URL(tab.url).origin,
             at: Date.now(),
+            scope: msg.scope ?? "login",
           });
         } catch {
           // An unparseable tab URL. Nothing to record, and nothing worth

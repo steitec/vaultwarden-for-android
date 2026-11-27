@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { isRedeemable, PENDING_TTL_MS, type PendingFill } from "../../src/background/pending";
 
 const AT = 1_000_000;
-const pending: PendingFill = { tabId: 7, origin: "https://fritz.box", at: AT };
+const pending: PendingFill = { tabId: 7, origin: "https://fritz.box", at: AT, scope: "login" };
 
 describe("isRedeemable", () => {
   it("redeems the same origin within the window", () => {
