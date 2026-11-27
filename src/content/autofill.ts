@@ -228,18 +228,58 @@ function selectOption(el: HTMLSelectElement, username: string): boolean {
   return true;
 }
 
+/**
+ * The `autocomplete` tokens that mark a field as the account identifier of a
+ * login. `username` is the standard's token for it; `webauthn` is reserved for
+ * credential fields and is what Amazon sets alone on its identifier step.
+ * Names, ids and a bare `type="email"` never count: they also sit on
+ * newsletter, search and sign-up fields.
+ */
+const IDENTIFIER_TOKENS = new Set(["username", "webauthn"]);
+
+function hasIdentifierToken(el: HTMLInputElement): boolean {
+  // getAttribute, not the `.autocomplete` IDL property: for a token list the
+  // engine does not consider canonical, jsdom and Firefox disagree there.
+  const raw = el.getAttribute("autocomplete");
+  if (raw === null) return false;
+  return raw
+    .toLowerCase()
+    .split(/\s+/)
+    .some((token) => IDENTIFIER_TOKENS.has(token));
+}
+
+/**
+ * The first screen of an email-first login: no usable password field, but a
+ * usable field explicitly marked as the login identifier. Returns null on any
+ * page with a usable password field, so an ordinary one-step login always
+ * takes the password path.
+ */
+export function findIdentifierField(doc: Document): HTMLInputElement | null {
+  if (findLoginFields(doc).password !== null) return null;
+  const layoutAvailable = hasLayout(doc);
+  return (
+    Array.from(doc.querySelectorAll<HTMLInputElement>(USERNAME_SELECTOR)).find(
+      (el) => isUsable(el, layoutAvailable) && hasIdentifierToken(el),
+    ) ?? null
+  );
+}
+
 export function fillFields(
   doc: Document,
   credentials: { username: string | null; password: string | null },
 ): { filledUsername: boolean; filledPassword: boolean } {
   const fields = findLoginFields(doc);
+  // With no password field, prefer the field marked as the login identifier
+  // over the first text input, which may be a search box above it.
+  const usernameField =
+    fields.password === null ? (findIdentifierField(doc) ?? fields.username) : fields.username;
 
   let filledUsername = false;
-  if (fields.username !== null && credentials.username !== null) {
-    if (fields.username instanceof HTMLSelectElement) {
-      filledUsername = selectOption(fields.username, credentials.username);
+  if (usernameField !== null && credentials.username !== null) {
+    if (usernameField instanceof HTMLSelectElement) {
+      filledUsername = selectOption(usernameField, credentials.username);
     } else {
-      setValue(fields.username, credentials.username);
+      setValue(usernameField, credentials.username);
       filledUsername = true;
     }
   }
