@@ -9,6 +9,19 @@ Dates are the day the version number was set.
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-11-27
+
+### Changed
+- On the first screen of an email-first login (Google, Microsoft, Amazon and
+  others), the badge now appears in the email field, and a tap fills the
+  username. The site has to mark the field `autocomplete="username"` or
+  `"webauthn"`; unmarked fields are never guessed at. The second screen is
+  unchanged (F-1).
+
+### Security
+- A password is never sent to that first screen: the fill carries the username
+  only, and so does a tap made while locked and redeemed after the unlock.
+
 ## [0.3.4] — 2026-11-23
 
 ### Changed
@@ -111,7 +124,8 @@ Dates are the day the version number was set.
   step of an unlock.
 - Matching by registrable domain; offline cache kept as ciphertext.
 
-[Unreleased]: https://github.com/steitec/vaultwarden-for-android/compare/v0.3.4...HEAD
+[Unreleased]: https://github.com/steitec/vaultwarden-for-android/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/steitec/vaultwarden-for-android/compare/v0.3.4...v0.4.0
 [0.3.4]: https://github.com/steitec/vaultwarden-for-android/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/steitec/vaultwarden-for-android/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/steitec/vaultwarden-for-android/compare/v0.3.1...v0.3.2

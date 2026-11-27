@@ -61,13 +61,17 @@ add-on deletes it too.
 To offer filling on login pages, the add-on can see the pages you open. It does
 not record or send them anywhere:
 
-- It looks for a visible password field. **A page without one is ignored
-  entirely**: nothing about it leaves the page.
-- On a page with a password field, the add-on checks on your phone whether one
-  of your vault entries belongs to that site. The page's address is compared
-  locally and is not stored or sent.
+- It looks for a visible password field, or for a visible field the site
+  itself marks as the sign-in name (`autocomplete="username"` or
+  `"webauthn"`), as on the first screen of logins that ask for the email
+  first. **A page with neither is ignored entirely**: nothing about it leaves
+  the page.
+- On such a page, the add-on checks on your phone whether one of your vault
+  entries belongs to that site. The page's address is compared locally and is
+  not stored or sent.
 - A password is put into a page only after you tap to fill, and only if the
-  entry belongs to the page that is actually open.
+  entry belongs to the page that is actually open. On a screen with only the
+  sign-in name, the tap fills the username and nothing else.
 
 ## Permissions
 

@@ -188,7 +188,9 @@ Include this text:
 >
 > **The content script holds no credentials.** `autofill.js` runs at
 > `document_idle`, looks for a visible password field, and — only if it finds
-> one — asks the background page whether anything matches. The answer it
+> one, or, on a page without one, a visible field marked
+> `autocomplete="username"` or `"webauthn"` (the first screen of an email-first
+> login) — asks the background page whether anything matches. The answer it
 > receives is the list of matching entries as `ItemSummary` values: id, name,
 > username, and three flags (has a TOTP secret, failed to decrypt, editable).
 > There is no password field on that type and there never has been. It then
@@ -198,7 +200,10 @@ Include this text:
 > fills that entry. It learns a credential only after such a tap, and only as a
 > message addressed to its own tab. A page with no login form produces no
 > message at all, so ordinary browsing is never reported to the background
-> page.
+> page. On the email-first screen a tap fills the username only: the
+> background page answers it with `{ kind: "fill", username, password: null }`,
+> after the same origin and entry checks as a full fill, and a tap made while
+> locked stays username-only when it is redeemed after the unlock.
 >
 > **Only a real tap counts.** The badge and the list act on an event only when
 > `event.isTrusted` is true (`src/content/gesture.ts`). Their host elements live

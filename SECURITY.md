@@ -47,9 +47,12 @@ could not close.
   source and all four go to the server URL you entered. No host is hard-coded.
   No analytics, no telemetry, no remote code.
 - **The content script holds no credentials.** It runs on every page it is
-  allowed on, looks for a visible password field, and only then asks the
-  background page whether anything matches. What it gets back is entry ids and
-  display names.
+  allowed on, looks for a visible password field (or, on a page without one,
+  a visible field marked `autocomplete="username"` or `"webauthn"`), and only
+  then asks the background page whether anything matches. What it gets back is
+  entry ids and display names. On the second kind of page a tap fills the
+  username only: the background page sends `password: null` there, also when
+  it redeems a tap made before an unlock.
 - **Filling into third-party frames is not done.** The content script does not
   declare `all_frames`, and a test asserts that absence, because a fill inside
   an attacker-controlled iframe is the classic exfiltration route for autofill.

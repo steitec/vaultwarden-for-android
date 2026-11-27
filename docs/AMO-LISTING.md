@@ -55,6 +55,9 @@ At most 250 characters. This one is 231.
 > - Shows a small button in the password field of a login page. One tap fills
 >   username and password. If several entries match, the tap opens a list to
 >   choose from.
+> - On login pages that ask for the email first (Google, Microsoft, Amazon and
+>   others), the button already appears on the first screen and fills the
+>   email address; the password follows on the next screen.
 > - Matches entries by site, so an entry saved for example.com is offered on
 >   login.example.com too.
 > - Unlocks with a PIN, so the master password is typed rarely. Or, if you
@@ -68,10 +71,6 @@ At most 250 characters. This one is 231.
 >
 > **What it does not do (yet)**
 >
-> - On login pages that ask for the email first and the password on a later
->   screen (Google, Microsoft, web.de and others), the button only appears on
->   the password screen. Opening the add-on and tapping the entry works on
->   every screen.
 > - It does not show TOTP codes, offer to save passwords you type, or handle
 >   cards, identities, attachments, Sends or passkeys.
 > - Entries that belong to an organization can be filled but not changed here;
@@ -131,6 +130,9 @@ users are likely to be German-speaking.
 > - Zeigt im Passwortfeld einer Login-Seite einen kleinen Knopf. Ein Tipp füllt
 >   Benutzername und Passwort aus. Passen mehrere Einträge, öffnet der Tipp
 >   eine Liste zur Auswahl.
+> - Auf Login-Seiten, die zuerst nur die E-Mail abfragen (Google, Microsoft,
+>   Amazon und andere), erscheint der Knopf schon auf der ersten Seite und
+>   füllt die E-Mail-Adresse; das Passwort folgt auf der nächsten Seite.
 > - Ordnet Einträge nach Website zu: Ein Eintrag für example.com wird auch auf
 >   login.example.com angeboten.
 > - Entsperrt mit einer PIN, damit du das Master-Passwort selten eintippen
@@ -144,10 +146,6 @@ users are likely to be German-speaking.
 >
 > **Was es (noch) nicht kann**
 >
-> - Auf Login-Seiten, die zuerst nur die E-Mail und erst auf einer späteren
->   Seite das Passwort abfragen (Google, Microsoft, web.de und andere),
->   erscheint der Knopf erst auf der Passwort-Seite. Über das Add-on-Menü
->   lässt sich der Eintrag auf jeder Seite antippen.
 > - Es zeigt keine TOTP-Codes, bietet nicht an, eingetippte Passwörter zu
 >   speichern, und kennt keine Karten, Identitäten, Anhänge, Sends oder
 >   Passkeys.
@@ -211,11 +209,11 @@ publishing these notes; otherwise drop the sentence.
 
 ## Before submitting
 
-- **F-1 (email-first logins).** The description above states the limitation
-  openly, which is one way to decide it. The other is to fix it first, and
-  then drop the first bullet under "What it does not do".
-- **A new version number.** 0.3.4 is spent on the unlisted channel, and AMO
-  counts numbers across both channels.
+- **F-1 (email-first logins).** Fixed in 0.4.0; the description above says
+  so. Confirm web.de on the phone before submitting, or leave it out of the
+  examples, as above.
+- **A new version number.** Up to 0.4.0 the numbers are spent on the unlisted
+  channel, and AMO counts numbers across both channels.
 - **Experimental flag.** Left off above, because the add-on is in daily use and
   checked on a device before each release. Turning it on would be the honest
   choice if the listing is meant as a trial; it can be switched off later.

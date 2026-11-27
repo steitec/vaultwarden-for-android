@@ -20,7 +20,7 @@ limitations and troubleshooting — are in the
 
 ## Status
 
-Version 0.3.4. In daily use by its author since 2026-08-29, on release Firefox
+Version 0.4.0. In daily use by its author since 2026-08-29, on release Firefox
 for Android, from a build signed by Mozilla.
 
 **It is not listed on addons.mozilla.org**, so there is no install button.
@@ -48,7 +48,9 @@ What changed in each version is in [`CHANGELOG.md`](CHANGELOG.md).
   storage is protected exactly as it is otherwise; what you give up is the
   lock on a phone someone else is holding. `SECURITY.md` says it in full.
 - Draws a badge inside a page's password field and fills username and password
-  on a tap.
+  on a tap. On the first screen of an email-first login (Google, Microsoft,
+  Amazon), where the site marks the field `autocomplete="username"` or
+  `"webauthn"`, the badge fills the username only.
 - Matches entries by registrable domain, so an entry saved for `example.com` is
   offered on `login.example.com`.
 - Keeps the last sync as ciphertext, so a vault stays readable with no network.
@@ -63,11 +65,10 @@ What changed in each version is in [`CHANGELOG.md`](CHANGELOG.md).
 These are true of the current build. They are here rather than in the issue
 tracker because finding them yourself is worse than being told.
 
-- **Email-first login pages get no badge on the first screen.** Where a provider
-  asks for the address first and the password on a later screen — web.de,
-  Google, Microsoft — the first screen has no password field, so the content
-  script stays silent by design; and the second screen usually has no username
-  field left to fill. Opening the add-on and tapping the entry still works.
+- **An email-first screen gets a badge only if the site marks its field.** The
+  signal is `autocomplete="username"` or `"webauthn"`; a field without either
+  token is never guessed at, so a newsletter or search box stays badge-free.
+  Opening the add-on and tapping the entry still works on such a page.
 - **A `<select>` username is filled only on an exact match.** A FRITZ!Box with
   FRITZ!Benutzer renders a dropdown instead of a text field. It is set when the
   entry's username is one of its options and left alone otherwise; not yet
